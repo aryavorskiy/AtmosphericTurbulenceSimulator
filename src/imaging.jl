@@ -1,4 +1,4 @@
-using LinearAlgebra, Random, FFTW, Distributions, HDF5
+using LinearAlgebra, FFTW, Distributions, HDF5, ProgressMeter
 
 struct BandSpec
     base_wavelength::Float64
@@ -166,22 +166,22 @@ function CircularAperture(sz::NTuple{2}, radius=minimum((sz .- 1) .÷ 2); aa_dis
 end
 
 _isfinite_photons(readout::NamedTuple) = get(readout, :photons, 0.0) isa Integer
-function simulate_images(imag_pipe, phase_sampler, true_sky=nothing; n=100_000, filename="images.h5",
+function simulate_images(imag_pipe, phase_sampler, true_sky=nothing; n, filename="images.h5",
         verbose=true, readout=(photons=10_000, background=1), true_sky_fft=isnothing(true_sky) ? nothing : ifft(ifftshift(true_sky)))
     h5open(filename, "w") do fid
         dataset = create_dataset(fid, "images", _isfinite_photons(readout) ? Int : Float64, (imgsize(imag_pipe)..., n))
-        orth_noise_ch = Channel{Vector{Float64}}(Threads.nthreads())
-        foreach(_ -> put!(orth_noise_ch, zeros(length(phase_sampler))), 1:Threads.nthreads())
+        noise_buffer_ch = Channel{Vector{Float64}}(Threads.nthreads())
+        foreach(_ -> put!(noise_buffer_ch, noise_buffer(phase_sampler)), 1:Threads.nthreads())
         phase_buffer_ch = Channel{Matrix{Float64}}(Threads.nthreads())
         foreach(_ -> put!(phase_buffer_ch, samplephases(phase_sampler)), 1:Threads.nthreads())
         phases_ch = Channel{Matrix{Float64}}(Threads.nthreads()) do ch
             Threads.@threads for _ in 1:n
                 phase_buffer = take!(phase_buffer_ch)
-                orth_noise = take!(orth_noise_ch)
+                orth_noise = take!(noise_buffer_ch)
                 randn!(orth_noise)
                 samplephases!(phase_buffer, phase_sampler, orth_noise)
                 put!(ch, phase_buffer)
-                put!(orth_noise_ch, orth_noise)
+                put!(noise_buffer_ch, orth_noise)
             end
         end
 
