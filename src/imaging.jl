@@ -19,33 +19,34 @@ function radial_blur!(out, src, bspec::FilterSpec)
     @assert size(out) == size(src)
     n1, n2 = size(src)
     ctr1, ctr2 = (n1 ÷ 2 + 1, n2 ÷ 2 + 1)
+    fill!(out, 0)
 
     Threads.@threads for p in axes(src, 3)
-        for j in 1:n2
-            dy = j - ctr2
-            for i in 1:n1
-                dx = i - ctr1
-                ze = zero(eltype(src))
-                for k in eachindex(bspec.wavelengths)
-                    r = bspec.wavelengths[k] / bspec.base_wavelength
+        for k in eachindex(bspec.wavelengths)
+            r = bspec.wavelengths[k] / bspec.base_wavelength
+            inten = bspec.intensities[k]
+            for j in 1:n2
+                dy = j - ctr2
+                sy = ctr2 + dy * r
+                iy = floor(Int, sy)
+                (1 <= iy < n2) || continue
+                @inbounds @simd for i in 1:n1
+                    dx = i - ctr1
                     sx = ctr1 + dx * r
-                    sy = ctr2 + dy * r
                     ix = floor(Int, sx)
-                    iy = floor(Int, sy)
-                    if 1 <= ix < n1 && 1 <= iy < n2
+                    if 1 <= ix < n1
                         tx = sx - ix
                         ty = sy - iy
                         v00 = src[ix,     iy    , p]
                         v10 = src[ix + 1, iy    , p]
                         v01 = src[ix,     iy + 1, p]
                         v11 = src[ix + 1, iy + 1, p]
-                        ze += ((1 - tx) * (1 - ty) * v00 +
+                        out[i, j, p] += ((1 - tx) * (1 - ty) * v00 +
                             tx       * (1 - ty) * v10 +
                             (1 - tx) * ty       * v01 +
-                            tx       * ty       * v11) * bspec.intensities[k]
+                            tx       * ty       * v11) * inten
                     end
                 end
-                out[i, j, p] = ze
             end
         end
     end
@@ -150,17 +151,22 @@ CircularAperture(sz::NTuple{2}, radius=minimum((sz .- 1) .÷ 2); kw...) =
     CircularAperture(Float64, sz, radius; kw...)
 
 function simulate_images(::Type{T}, img_spec::ImagingSpec, phase_sampler::PhaseSampler, true_sky=nothing; n::Int,
-        batch::Int=64, filename="images.h5", verbose=true, readout=(photons=10_000, background=1),
+        batch::Int=64, filename="images.h5", verbose=true, save_phases=true, readout=(photons=10_000, background=1),
         true_sky_fft=isnothing(true_sky) ? nothing : ifft(ifftshift(true_sky))) where T
+    batch = min(batch, n)
     img_buffers = ImagingBuffers(img_spec, batch)
     img_size = img_spec.img_size
-    batch = min(batch, n)
     h5open(filename, "w") do fid
-        dataset = create_dataset(fid, "images", T, (img_size..., n), chunk=(img_size..., batch))
+        img_dataset = create_dataset(fid, "images", T, (img_size..., n), chunk=(img_size..., batch))
         p = Progress(n, "Simulating images", enabled=verbose, dt=1)
         real_img = zeros(T, img_size..., batch)
         noise_buf = noise_buffer(phase_sampler, batch)
         phase_buf = samplephases(phase_sampler, batch)
+        if save_phases
+            phs_size = plate_size(phase_sampler)
+            fid["aperture"] = img_spec.aperture
+            phs_dataset = create_dataset(fid, "phases", eltype(phase_buf), (phs_size..., n), chunk=(phs_size..., batch))
+        end
         for j in 1:cld(n, batch)
             samplephases!(phase_buf, phase_sampler, noise_buf)
             img = psf!(img_buffers, phase_buf)
@@ -168,7 +174,8 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec, phase_sampler::PhaseS
                 img = apply_image_fft!(img_buffers, true_sky_fft)
             end
             simulate_readout!(real_img, img; readout...)
-            HDF5.write_chunk(dataset, j - 1, real_img)
+            HDF5.write_chunk(img_dataset, j - 1, real_img)
+            save_phases && HDF5.write_chunk(phs_dataset, j - 1, phase_buf)
             next!(p, step=min(batch, n - (j - 1) * batch))
         end
         finish!(p)
