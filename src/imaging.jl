@@ -16,26 +16,25 @@ Base.convert(::Type{FilterSpec{T}}, bspec::FilterSpec) where T<:Real =
         bspec.wavelengths, bspec.intensities)
 
 function prepare_spmat(::Type{T}, img_size, bspec::FilterSpec) where T<:Real
-    n1, n2 = img_size
-    ctr1, ctr2 = (n1 ÷ 2 + 1, n2 ÷ 2 + 1)
+    ctr1, ctr2 = img_size .÷ 2 .+ 1
     is = Int[]
     js = Int[]
     vs = T[]
-    linds = LinearIndices((n1, n2))
-
+    linds = LinearIndices(img_size)
+    nx, ny = img_size
     for k in eachindex(bspec.wavelengths)
         r = bspec.wavelengths[k] / bspec.base_wavelength
         inten = bspec.intensities[k]
-        for j in 1:n2
+        for j in 1:ny
             dy = j - ctr2
             sy = ctr2 + dy * r
             iy = floor(Int, sy)
-            (1 <= iy < n2) || continue
-            for i in 1:n1
+            (1 <= iy < ny) || continue
+            for i in 1:nx
                 dx = i - ctr1
                 sx = ctr1 + dx * r
                 ix = floor(Int, sx)
-                if 1 <= ix < n1
+                if 1 <= ix < nx
                     tx = sx - ix
                     ty = sy - iy
                     push!(is, linds[i, j], linds[i, j], linds[i, j], linds[i, j])
@@ -48,27 +47,29 @@ function prepare_spmat(::Type{T}, img_size, bspec::FilterSpec) where T<:Real
             end
         end
     end
-    return sparse(is, js, vs, n1 * n2, n1 * n2)
+    return sparse(is, js, vs, nx * ny, nx * ny)
 end
 
 function radial_blur!(out, src, smat::SparseMatrixCSC)
     @assert size(out) == size(src)
-    n1, n2, np = size(src)
-    src_rs = reshape(src, n1 * n2, np)
-    out_rs = reshape(out, n1 * n2, np)
-    Threads.@threads for p in 1:np
-        mul!(view(out_rs, :, p), smat, view(src_rs, :, p))
+    nx, ny, nb = size(src)
+    src_rs = reshape(src, nx * ny, nb)
+    out_rs = reshape(out, nx * ny, nb)
+    Threads.@threads for j in 1:nb
+        mul!(view(out_rs, :, j), smat, view(src_rs, :, j))
     end
     return out
 end
-radial_blur!(out, src, smat::AbstractMatrix) =
+function radial_blur!(out, src, smat::AbstractMatrix)
     mul!(reshape(out, :, size(src, 3)), smat, reshape(src, :, size(src, 3)))
+    return out
+end
 radial_blur!(out, src, ::Nothing) = copyto!(out, src)
 
 struct ImagingSpec{T, AT<:AbstractMatrix{T}}
     aperture::AT
     img_size::NTuple{2,Int}
-    band_spec::FilterSpec{T}
+    filter_spec::FilterSpec{T}
 end
 ImagingSpec(aperture::AbstractMatrix{T}, imsize::NTuple{2,Int}, bspec::FilterSpec) where T<:Real =
     ImagingSpec{T, typeof(aperture)}(aperture, imsize, convert(FilterSpec{T}, bspec))
@@ -91,7 +92,7 @@ ImagingSpec(aperture, imsize::NTuple{2,Int}) =
 
 struct ImagingBuffers{AT, BT, MT, PT}
     aperture::AT
-    band_spec::BT
+    radial_blur::BT
     aperture_buffer::MT
     focal_buffer::MT
     fftplan::PT
@@ -101,8 +102,8 @@ function ImagingBuffers(imgspec::ImagingSpec, batch)
     complex_type = complex(eltype(imgspec.aperture))
     buf1 = similar(imgspec.aperture, complex_type, imgspec.img_size..., batch)
     buf2 = similar(imgspec.aperture, complex_type, imgspec.img_size..., batch)
-    if length(imgspec.band_spec.wavelengths) > 1
-        smat = prepare_spmat(eltype(imgspec.aperture), imgspec.img_size, imgspec.band_spec)
+    if length(imgspec.filter_spec.wavelengths) > 1
+        smat = prepare_spmat(eltype(imgspec.aperture), imgspec.img_size, imgspec.filter_spec)
     else
         smat = nothing
     end
@@ -121,9 +122,9 @@ end
 function psf!(bufs::ImagingBuffers, phases)
     write_phases!(bufs.focal_buffer, phases, bufs.aperture)
     mul!(bufs.aperture_buffer, bufs.fftplan, bufs.focal_buffer)
-    ifftshift!(bufs.focal_buffer, bufs.aperture_buffer, (1, 2))
+    fftshift!(bufs.focal_buffer, bufs.aperture_buffer, (1, 2))
     bufs.aperture_buffer .= abs2.(bufs.focal_buffer)
-    radial_blur!(bufs.focal_buffer, bufs.aperture_buffer, bufs.band_spec)
+    radial_blur!(bufs.focal_buffer, bufs.aperture_buffer, bufs.radial_blur)
 end
 
 function apply_image_fft!(pipeline::ImagingBuffers, true_img_fft; kw...)
