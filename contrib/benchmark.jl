@@ -1,5 +1,4 @@
 using AtmosphericTurbulenceSimulator, FFTW
-FFTW.set_num_threads(8)
 
 print("Benchmarking atmospheric turbulence simulation...\n")
 turb = KolmogorovUncorrelated(Float32, (85, 85), 0.2 / (2/85))

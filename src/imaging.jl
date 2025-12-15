@@ -137,16 +137,6 @@ function write_phases!(aperture_buffer, phases, aperture)
     return pipeline
 end
 
-function radial_blur!(out, src, smat::SparseMatrixCSC)
-    @assert size(out) == size(src)
-    nx, ny, nb = size(src)
-    src_rs = reshape(src, nx * ny, nb)
-    out_rs = reshape(out, nx * ny, nb)
-    Threads.@threads for j in 1:nb
-        mul!(view(out_rs, :, j), smat, view(src_rs, :, j))
-    end
-    return out
-end
 function radial_blur!(out, src, smat::AbstractMatrix)
     mul!(reshape(out, :, size(src, 3)), smat, reshape(src, :, size(src, 3)))
     return out
@@ -174,9 +164,7 @@ function apply_image!(dst, ibufs::ImagingBuffers, ds::DoubleSystem, psf_norm)
     o1, o2 = ds.rel_position
     s1_dest, s1_src = o1 > 0 ? (o1 + 1:size(img, 1), 1:size(img, 1) - o1) : (1:size(img, 1) + o1, -o1 + 1:size(img, 1))
     s2_dest, s2_src = o2 > 0 ? (o2 + 1:size(img, 2), 1:size(img, 2) - o2) : (1:size(img, 2) + o2, -o2 + 1:size(img, 2))
-    Threads.@threads for j in axes(img, 3)
-        @. img[s1_dest, s2_dest, j] += img[s1_src, s2_src, j] * ds.intensity
-    end
+    @. img[s1_dest, s2_dest, :] += img[s1_src, s2_src, :] * ds.intensity
     apply_image!(dst, ibufs, ds.brightness, psf_norm)
 end
 function apply_image!(dst, ibufs::ImagingBuffers, pt::PointSource, psf_norm)
@@ -184,9 +172,7 @@ function apply_image!(dst, ibufs::ImagingBuffers, pt::PointSource, psf_norm)
     if isfinite(pt.nphotons)
         @assert maximum(abs ∘ imag, img) / maximum(abs ∘ real, img) < 1e-5
         @assert all(x -> real(x) ≥ 0, img)
-        Threads.@threads for j in axes(img, 3)
-            @. dst[:, :, j] = rand(Poisson(real(@view img[:, :, j]) / psf_norm * pt.nphotons + pt.background))
-        end
+        @. dst = rand(Poisson(real(img) / psf_norm * pt.nphotons + pt.background))
     else
         copyto!(dst, img)
     end
@@ -219,7 +205,6 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec{T2}, phase_sampler::Ph
     end
     true_sky_conv = convert(TrueSky{T2}, true_sky)
     batch = min(batch, n)
-    img_buffers = ImagingBuffers(img_spec, batch)
     img_size = img_spec.img_size
     h5open(filename, "w") do fid
         img_dataset = create_dataset(fid, "images", T, (img_size..., n), chunk=(img_size..., batch))
@@ -233,10 +218,23 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec{T2}, phase_sampler::Ph
             phs_dataset = create_dataset(fid, "phases", eltype(phase_buf), (phs_size..., n), chunk=(phs_size..., batch))
         end
         psf_norm = sum(img_spec.aperture)^2
+
+        img_buf1 = ImagingBuffers(img_spec, 1)
+        img_buf_channel = Channel{typeof(img_buf1)}(Threads.nthreads())
+        put!(img_buf_channel, img_buf1)
+        Threads.@threads for _ in 1:Threads.nthreads()-1
+            img_buffs = ImagingBuffers(img_spec, 1)
+            put!(img_buf_channel, img_buffs)
+        end
         for j in 1:cld(n, batch)
             samplephases!(phase_buf, phase_sampler, noise_buf)
-            psf!(img_buffers, phase_buf)
-            apply_image!(real_img, img_buffers, true_sky_conv, psf_norm)
+            Threads.@threads for j in 1:batch
+                img_buffs = take!(img_buf_channel)
+                psf!(img_buffs, view(phase_buf, :, :, j))
+                apply_image!(view(real_img, :, :, j),
+                    img_buffs, true_sky_conv, psf_norm)
+                put!(img_buf_channel, img_buffs)
+            end
             HDF5.write_chunk(img_dataset, j - 1, real_img)
             save_phases && HDF5.write_chunk(phs_dataset, j - 1, phase_buf)
             next!(p, step=min(batch, n - (j - 1) * batch))
