@@ -242,8 +242,9 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec{T2}, phase_sampler::Ph
             fid["aperture"] = img_spec.aperture
             phs_dataset = create_dataset(fid, "phases", eltype(phase_buf), (phs_size..., n), chunk=(phs_size..., batch))
         end
-        psf_norm = sum(img_spec.aperture)^2
-
+        psf_norm = sum(abs2, img_spec.aperture) * prod(img_size) *
+            sum(img_spec.filter_spec.intensities .* img_spec.filter_spec.wavelengths .^ 2) /
+            img_spec.filter_spec.base_wavelength ^ 2
         img_buf_channel = _prepare_imgbuffers(img_spec, batch, serial ? Val(:serial) : Val(:threaded))
         for j in 1:cld(n, batch)
             samplephases!(phase_buf, phase_sampler, noise_buf)
