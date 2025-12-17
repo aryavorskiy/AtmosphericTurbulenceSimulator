@@ -1,6 +1,6 @@
 using LinearAlgebra, HDF5, Random, Adapt
 
-abstract type PhaseSampler end
+abstract type AtmosphereSpec{T} end
 
 """
     kolmogorov_covmat(W)
@@ -31,82 +31,37 @@ kolmogorov_covmat(::Type{T}, sz::NTuple{2,Int}) where T =
 kolmogorov_covmat(sz::NTuple{2,Int}) = kolmogorov_covmat(Float64, sz)
 
 const EigenType = Union{Tuple{<:Any,<:Any}, Eigen}
-struct CovariantNoise{MT} <: PhaseSampler
+struct KarhunenLoeveBuffers{MT}
     shape::NTuple{2,Int}
+    noise_buffer::MT
     noise_transform::MT
+    out_buffer::MT
 end
-noise_buffer(sampler::CovariantNoise, batch::Int...) =
-    similar(sampler.noise_transform, size(sampler.noise_transform, 2), batch...)
-noise_eltype(sampler::CovariantNoise) = eltype(sampler.noise_transform)
-plate_size(sampler::CovariantNoise) = sampler.shape
-function CovariantNoise(sz::NTuple{2,Int}, (E, U)::EigenType)
+function KarhunenLoeveBuffers(sz::NTuple{2,Int}, (E, U)::EigenType, batch::Int)
     @assert length(E) == prod(sz)
     @assert size(U) == (length(E), length(E))
     E .= clamp.(E, 0, Inf)
-    CovariantNoise(sz, U .* sqrt.(E'))
+    noise_transform = U .* sqrt.(E')
+    noise_buffer = similar(U, size(U, 2), batch)
+    out_buffer = similar(U, prod(sz), batch)
+    KarhunenLoeveBuffers(sz, noise_buffer, noise_transform, out_buffer)
 end
-Adapt.adapt_structure(to, sampler::CovariantNoise) =
-    CovariantNoise(sampler.shape, Adapt.adapt_storage(to, sampler.noise_transform))
-
-screensize(sampler::CovariantNoise) = sampler.shape
-function samplephases!(phases, sampler::CovariantNoise, noise_buffer)
-    @assert size(noise_buffer, 1) == size(sampler.noise_transform, 2)
-    @assert size(noise_buffer, 2) == size(phases, 3)
-    randn!(noise_buffer)
-    phases_rs = reshape(phases, size(sampler.noise_transform, 1), size(phases, 3))
-    mul!(phases_rs, sampler.noise_transform, noise_buffer)
-    return phases
-end
-function samplephases(sampler::CovariantNoise, batch::Int...)
-    nbuf = noise_buffer(sampler, batch...)
-    phases = similar(nbuf, plate_size(sampler)..., batch...)
-    samplephases!(phases, sampler, nbuf)
+plate_size(sampler::KarhunenLoeveBuffers) = sampler.shape
+function samplephases!(sampler::KarhunenLoeveBuffers)
+    randn!(sampler.noise_buffer)
+    mul!(sampler.out_buffer, sampler.noise_transform, sampler.noise_buffer)
+    return reshape(sampler.out_buffer, (sampler.shape..., size(sampler.out_buffer, 2)))
 end
 
-function project_sampler(sampler::CovariantNoise, basis)
-    @assert size(basis, 1) == size(sampler.noise_transform, 1)
-    basisq = Matrix(qr(basis).Q)
-    return CovariantNoise(sampler.shape, basisq * basisq' * sampler.noise_transform)
+struct IndependentFrames{T} <: AtmosphereSpec{T}
+    size::NTuple{2, Int}
+    r₀::T
 end
+IndependentFrames(::Type{T}, sz::NTuple{2,Int}, r0) where T = IndependentFrames{T}(sz, r0)
 
-struct KolmogorovUncorrelated{T, MT<:AbstractMatrix{T}} <: PhaseSampler
-    weights::MT
-    sampler::CovariantNoise{MT}
-    factor::T
-end
-"""
-    KolmogorovUncorrelated(W, r₀)
-
-Create a phase sampler that generates uncorrelated Kolmogorov-distributed phase screens over an aperture defined by `W`.
-
-# Arguments
-- `W`: the aperture weights. Either a 2D array, or a `(x, y)` tuple representing the size
-    of the aperture (in this case the aperture function is assumed to be a square of this
-    size).
-- `r₀`: the Fried parameter (in the same units as the aperture size).
-"""
-KolmogorovUncorrelated(weights::AbstractMatrix, r₀::Real) =
-    KolmogorovUncorrelated(weights,
-        CovariantNoise(size(weights), eigen(kolmogorov_covmat(weights))),
-        convert(eltype(weights), (r₀)^(-5/6)))
-KolmogorovUncorrelated(::Type{T}, sz::NTuple{2,Int}, r₀::Real) where T =
-    KolmogorovUncorrelated(fill(convert(T, 1/prod(sz)), sz...), r₀)
-KolmogorovUncorrelated(sz::NTuple{2,Int}, r₀::Real) =
-    KolmogorovUncorrelated(Float64, sz, r₀)
-Adapt.adapt_structure(to, turb::KolmogorovUncorrelated) =
-    KolmogorovUncorrelated(
-        Adapt.adapt_storage(to, turb.weights),
-        Adapt.adapt_structure(to, turb.sampler),
-        turb.factor)
-
-noise_buffer(turb::KolmogorovUncorrelated, batch...) = noise_buffer(turb.sampler, batch...)
-noise_eltype(turb::KolmogorovUncorrelated) = noise_eltype(turb.sampler)
-plate_size(turb::KolmogorovUncorrelated) = plate_size(turb.sampler)
-function samplephases!(phases, turb::KolmogorovUncorrelated, noise_buffer)
-    samplephases!(phases, turb.sampler, noise_buffer)
-    @. phases *= turb.factor
-end
-function samplephases(turb::KolmogorovUncorrelated, batch...)
-    phases = samplephases(turb.sampler, batch...)
-    @. phases *= turb.factor
+function prepare_phasebuffers(spec::IndependentFrames{T}, batch::Int, device_adapter) where T
+    covar = Adapt.adapt_storage(device_adapter, kolmogorov_covmat(T, spec.size))
+    covar .*= spec.r₀^(-5/3)
+    E, U = eigen(covar)
+    return KarhunenLoeveBuffers(spec.size, (E, U), batch)
 end
