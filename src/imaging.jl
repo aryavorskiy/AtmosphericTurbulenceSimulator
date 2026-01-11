@@ -153,7 +153,7 @@ end
 TrueSkyImage(mat::AbstractMatrix; kw...) =
     TrueSkyImage(mat, PointSource(; kw...))
 Base.convert(::Type{TrueSky{T}}, b::TrueSkyImage) where {T<:Real} =
-    TrueSkyImage{T, typeof(b.true_sky_fft)}(convert.(Complex{T}, b.true_sky_fft), convert(TrueSky{T}, b.brightness))
+    TrueSkyImage(convert.(Complex{T}, b.true_sky_fft), convert(TrueSky{T}, b.brightness))
 Adapt.adapt_structure(to, ts::TrueSkyImage) =
     TrueSkyImage(Adapt.adapt_storage(to, ts.true_sky_fft), ts.brightness)
 isfinite_photons(ts::TrueSkyImage) = isfinite_photons(ts.brightness)
@@ -200,6 +200,9 @@ struct ImagingBuffers{AT, BT, MT, PT}
     focal_buffer::MT
     fftplan::PT
 end
+plate_size(bufs::ImagingBuffers) = size(bufs.aperture)
+image_size(bufs::ImagingBuffers) = size(bufs.aperture_buffer)[1:2]
+batch_length(bufs::ImagingBuffers) = size(bufs.aperture_buffer, 3)
 
 function ImagingBuffers(imgspec::ImagingSpec, blur, batch::Int)
     complex_type = complex(eltype(imgspec.aperture))
@@ -250,7 +253,8 @@ end
 function apply_image!(dst, ibufs::ImagingBuffers, ds::DoubleSystem, psf_norm)
     img = ibufs.focal_buffer
     @assert all(abs.(ds.rel_position) .< size(img)[1:2] .÷ 2)
-    @assert size(dst) == size(img)
+    @assert size(dst)[1:2] == image_size(ibufs)
+    @assert size(dst, 3) == batch_length(ibufs)
     o1, o2 = ds.rel_position
     s1_dest, s1_src = o1 > 0 ? (o1 + 1:size(img, 1), 1:size(img, 1) - o1) : (1:size(img, 1) + o1, -o1 + 1:size(img, 1))
     s2_dest, s2_src = o2 > 0 ? (o2 + 1:size(img, 2), 1:size(img, 2) - o2) : (1:size(img, 2) + o2, -o2 + 1:size(img, 2))
@@ -361,8 +365,17 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec{FT}, atm_spec::Atmosph
     if !isfinite_photons(truesky) && T <: Integer
         throw(ArgumentError("Integer image eltype not compatible with infinite-photon true sky model."))
     end
+    if plate_size(img_spec) != plate_size(atm_spec)
+        throw(ArgumentError("Telescope plate size $(plate_size(img_spec)) does not match" *
+            "AtmosphereSpec plate size $(plate_size(atm_spec))."))
+    end
+    if truesky isa TrueSkyImage && size(truesky.true_sky_fft) != image_size(img_spec)
+        throw(ArgumentError("TrueSkyImage size $(size(truesky.true_sky_fft)) does not match " *
+            "image size $(image_size(img_spec))."))
+    end
+
     batch = min(batch, n)
-    img_size = img_spec.img_size
+    img_size = image_size(img_spec)
     real_img = zeros(T, img_size..., batch)
     spec_psf_norm = psf_norm(img_spec)
     truesky_adapt = adapt(deviceadapter, convert(TrueSky{FT}, truesky))
@@ -372,7 +385,7 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec{FT}, atm_spec::Atmosph
     h5open(filename, "w") do fid
         fid["aperture"] = img_spec.aperture
         img_dataset = create_dataset(fid, "images", T, (img_size..., n), chunk=(img_size..., batch))
-        p = Progress(n, "Simulating images", enabled=verbose, dt=1)
+        p = Progress(n, desc="Simulating images", enabled=verbose, dt=1)
         if savephases
             phs_size = plate_size(phasebuffers)
             phs_dataset = create_dataset(fid, "phases", FT2, (phs_size..., n), chunk=(phs_size..., batch))

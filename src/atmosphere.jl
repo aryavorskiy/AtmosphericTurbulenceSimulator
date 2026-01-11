@@ -109,18 +109,18 @@ An `AtmosphereSpec` that produces independent (uncorrelated) phase frames for ea
 The Harding interpolation follows "Fast simulation of a Kolmogorov phase screen"
 Cressida M. Harding, Rachel A. Johnston, and Richard G. Lane, APPLIED OPTICS Vol. 38, No. 11, April 1999
 """
-struct SingleLayer{T,N} <: AtmosphereSpec{T}
+struct SingleLayer{T<:Real,N} <: AtmosphereSpec{T}
     harding::HardingSpec{N}
     r₀::T
 end
-SingleLayer(sz::NTuple{2,Int}, r0::T; kw...) where T =
-    SingleLayer(HardingSpec(sz; kw...), r0)
+SingleLayer(sz::NTuple{2,Int}, r0::Real; kw...) =
+    SingleLayer(HardingSpec(sz; kw...), float(r0))
 SingleLayer(::Type{T}, sz::NTuple{2,Int}, r0; kw...) where T =
-    SingleLayer(HardingSpec(sz; kw...), convert(T, float(r0)))
+    SingleLayer(HardingSpec(sz; kw...), convert(T, r0))
 plate_size(spec::SingleLayer) = spec.harding.interpolate_to
 function prepare_phasebuffers(spec::SingleLayer{T,N}, batch::Int, deviceadapter) where {T,N}
     low_size = spec.harding.interpolate_from
-    covar = Adapt.adapt_storage(deviceadapter, kolmogorov_covmat(T, low_size))
+    covar = Adapt.adapt_storage(deviceadapter, kolmogorov_covmat(float(T), low_size))
     low_r₀ = spec.r₀ / 2^N
     covar .*= low_r₀^(-5/3)
     E, U = eigen(Symmetric(covar))
@@ -245,7 +245,7 @@ function simulate_phases(atm_spec::AtmosphereSpec{FT}; n::Int, batch::Int=DEFAUL
     h5open(filename, "w") do fid
         phs_size = plate_size(atm_spec)
         phs_dataset = create_dataset(fid, "phases", FT, (phs_size..., n), chunk=(phs_size..., batch))
-        p = Progress(n, "Simulating phases", enabled=verbose, dt=1)
+        p = Progress(n, desc="Simulating phases", enabled=verbose, dt=1)
         phase_buf_h5 = zeros(FT, phs_size..., batch)
         for j in 1:cld(n, batch)
             phases = samplephases!(phasebuffers)
