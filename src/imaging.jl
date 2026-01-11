@@ -263,12 +263,12 @@ function apply_image!(dst, ibufs::ImagingBuffers, ds::DoubleSystem, psf_norm)
 end
 function apply_image!(dst, ibufs::ImagingBuffers, pt::PointSource, psf_norm)
     img = ibufs.focal_buffer
+    @assert maximum(abs ∘ imag, img) / maximum(abs ∘ real, img) < 1e-5
+    @assert all(x -> real(x) ≥ 0, img)
     if isfinite(pt.nphotons)
-        @assert maximum(abs ∘ imag, img) / maximum(abs ∘ real, img) < 1e-5
-        @assert all(x -> real(x) ≥ 0, img)
         @. dst = rand(Poisson(real(img) / psf_norm * pt.nphotons + pt.background))
     else
-        copyto!(dst, img)
+        @. dst = real(img) / psf_norm
     end
 end
 
@@ -361,7 +361,7 @@ the results to an HDF5 file.
 """
 function simulate_images(::Type{T}, img_spec::ImagingSpec{FT}, atm_spec::AtmosphereSpec{FT2},
     truesky::TrueSky=PointSource(); n::Int, batch::Int=DEFAULT_BATCH, filename="simulation.h5", verbose=true,
-    savephases::Bool=true, deviceadapter=Array) where {T,FT,FT2}
+    savephases::Bool=true, deviceadapter=Array, write=true) where {T,FT,FT2}
     if !isfinite_photons(truesky) && T <: Integer
         throw(ArgumentError("Integer image eltype not compatible with infinite-photon true sky model."))
     end

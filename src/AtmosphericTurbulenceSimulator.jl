@@ -6,4 +6,6 @@ include("imaging.jl")
 export FilterSpec, ImagingSpec, PointSource, DoubleSystem, TrueSkyImage, CircularAperture,
     simulate_images, simulate_phases
 
+include("precompile.jl")
+
 end # module AtmosphericTurbulenceSimulator
