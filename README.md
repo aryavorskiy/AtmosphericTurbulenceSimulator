@@ -116,9 +116,8 @@ Please note that this package is in early development. There are multiple featur
     - [x] Harding interpolation
     - [ ] Frozen flow
     - [ ] Multi-layer atmospheres
-- More advanced imaging models
-    - [ ] Multi-wavelength imaging
-    - [ ] Non-achromatic optical systems
-    - [ ] Non-circular apertures
-    - [ ] Off-axis propagation
+    - [ ] Fresnel propagation
+- [ ] Multi-wavelength imaging
+- [ ] Coronagraph models
+- [ ] Wavefront sensor simulation (?)
 - [ ] FITS support (?)
