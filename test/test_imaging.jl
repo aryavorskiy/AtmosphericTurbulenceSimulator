@@ -1,15 +1,18 @@
 @testset "Imaging" begin
     ap = CircularAperture((16, 16))
-    img_spec = ImagingSpec(ap, nyquist_oversample=1)
     atm = SingleLayer((16, 16), 5)
+    img_spec = ImagingSpec(ap)
     @testset "True sky" begin
         ts1 = PointSource(1e6, 100)
         ts2 = DoubleSystem((3, 2), 0.6; nphotons=1e6, background=100)
         ts3 = TrueSkyImage(rand(32, 32); nphotons=1e6, background=100)
 
-        for ts in (ts1, ts2, ts3)
+        img_spec2 = ImagingSpec(ap, FilterSpec(1, bandpass=0.1))
+        img_spec3 = ImagingSpec(ap, FilterSpec(1, bandpass=0.1, tedge=0.5))
+
+        for (ts, is) in zip((ts1, ts2, ts3), (img_spec, img_spec2, img_spec3))
             tmpfile = tempname() * ".h5"
-            simulate_images(Int32, img_spec, atm, ts; n=16, filename=tmpfile, verbose=false)
+            simulate_images(Int32, is, atm, ts; n=16, filename=tmpfile, verbose=false)
 
             h5open(tmpfile, "r") do fid
                 @test haskey(fid, "images")
@@ -40,10 +43,6 @@
     end
 
     @testset "Continuous vs Poisson" begin
-        ap = CircularAperture((16, 16), 6.0)
-        img_spec = ImagingSpec(ap)
-        atm = SingleLayer((16, 16), 100.0)  # Very large r0 for minimal turbulence
-
         # Continuous flux
         ts_cont = PointSource(Inf, 0.0)
         @test_throws ArgumentError simulate_images(Int32, img_spec, atm, ts_cont; n=16)

@@ -1,8 +1,8 @@
 # AtmosphericTurbulenceSimulator
 
 [![docs-dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aryavorskiy.github.io/AtmosphericTurbulenceSimulator.jl/dev/)
-[![CI](https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator/actions/workflows/ci.yml/badge.svg)](https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator/branch/master/graph/badge.svg)](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator)
+[![CI](https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator.jl)
 [![JET](https://img.shields.io/badge/JET.jl-tested-green.svg)](https://github.com/aviatesk/JET.jl)
 
 A simple (yet) Julia toolchain to simulate atmospheric turbulence effects on imaging systems. It provides
