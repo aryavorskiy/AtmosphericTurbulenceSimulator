@@ -25,7 +25,7 @@ function kolmogorov_covmat(W::AbstractMatrix)
     Wp = W ./ sum(W)
     Cp = vec(sum(C .* vec(Wp)', dims=2))
     Cc = sum(Cp .* vec(Wp))
-    return Symmetric(C .- Cp .- Cp' .+ Cc)
+    return C .- (Cp .+ Cp') .+ Cc
 end
 kolmogorov_covmat(::Type{T}, sz::NTuple{2,Int}) where T = kolmogorov_covmat(ones(T, sz))
 kolmogorov_covmat(sz::NTuple{2,Int}) = kolmogorov_covmat(Float64, sz)
