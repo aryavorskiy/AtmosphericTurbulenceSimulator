@@ -1,6 +1,9 @@
 # AtmosphericTurbulenceSimulator
 
 [![docs-dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aryavorskiy.github.io/AtmosphericTurbulenceSimulator.jl/dev/)
+[![CI](https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator/actions/workflows/ci.yml/badge.svg)](https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator/branch/master/graph/badge.svg)](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator)
+[![JET](https://img.shields.io/badge/JET.jl-tested-green.svg)](https://github.com/aviatesk/JET.jl)
 
 A simple (yet) Julia toolchain to simulate atmospheric turbulence effects on imaging systems. It provides
 utilities to define different telescope apertures and true sky models; the phase screens are generated
