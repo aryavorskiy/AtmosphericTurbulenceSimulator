@@ -193,22 +193,22 @@ image_size(img_spec::ImagingSpec) = img_spec.img_size
 psf_norm(img_spec::ImagingSpec) = sum(abs2, img_spec.aperture) * prod(img_spec.img_size) *
         sum(img_spec.filter_spec.intensities)
 
-struct ImagingBuffers{AT, BT, MT, PT}
+struct OpticalBuffers{AT, BT, MT, PT}
     aperture::AT
     radial_blur::BT
     aperture_buffer::MT
     focal_buffer::MT
     fftplan::PT
 end
-plate_size(bufs::ImagingBuffers) = size(bufs.aperture)
-image_size(bufs::ImagingBuffers) = size(bufs.aperture_buffer)[1:2]
-batch_length(bufs::ImagingBuffers) = size(bufs.aperture_buffer, 3)
+plate_size(bufs::OpticalBuffers) = size(bufs.aperture)
+image_size(bufs::OpticalBuffers) = size(bufs.aperture_buffer)[1:2]
+batch_length(bufs::OpticalBuffers) = size(bufs.aperture_buffer, 3)
 
-function ImagingBuffers(imgspec::ImagingSpec, blur, batch::Int)
+function OpticalBuffers(imgspec::ImagingSpec, blur, batch::Int)
     complex_type = complex(eltype(imgspec.aperture))
     buf1 = similar(imgspec.aperture, complex_type, imgspec.img_size..., batch)
     buf2 = similar(imgspec.aperture, complex_type, imgspec.img_size..., batch)
-    return ImagingBuffers(imgspec.aperture, blur, buf1, buf2, plan_fft(buf1, (1, 2)))
+    return OpticalBuffers(imgspec.aperture, blur, buf1, buf2, plan_fft(buf1, (1, 2)))
 end
 function prepare_blur(imgspec::ImagingSpec)
     if length(imgspec.filter_spec.wavelengths) > 1
@@ -217,9 +217,9 @@ function prepare_blur(imgspec::ImagingSpec)
         return nothing
     end
 end
-function ImagingBuffers(imgspec::ImagingSpec, batch::Int)
+function OpticalBuffers(imgspec::ImagingSpec, batch::Int)
     blur = prepare_blur(imgspec)
-    return ImagingBuffers(imgspec, blur, batch)
+    return OpticalBuffers(imgspec, blur, batch)
 end
 
 function write_phases!(aperture_buffer, phases, aperture)
@@ -236,7 +236,7 @@ function radial_blur!(out, src, smat::AbstractMatrix)
 end
 radial_blur!(out, src, ::Nothing) = copyto!(out, src)
 
-function psf!(bufs::ImagingBuffers, phases)
+function psf!(bufs::OpticalBuffers, phases)
     write_phases!(bufs.focal_buffer, phases, bufs.aperture)
     mul!(bufs.aperture_buffer, bufs.fftplan, bufs.focal_buffer)
     fftshift!(bufs.focal_buffer, bufs.aperture_buffer, (1, 2))
@@ -244,13 +244,13 @@ function psf!(bufs::ImagingBuffers, phases)
     radial_blur!(bufs.focal_buffer, bufs.aperture_buffer, bufs.radial_blur)
 end
 
-function apply_image!(dst, ibufs::ImagingBuffers, ts::TrueSkyImage, psf_norm)
+function apply_truesky!(dst, ibufs::OpticalBuffers, ts::TrueSkyImage, psf_norm)
     mul!(ibufs.aperture_buffer, ibufs.fftplan, ibufs.focal_buffer)
     ibufs.aperture_buffer .*= ts.true_sky_fft
     ldiv!(ibufs.focal_buffer, ibufs.fftplan, ibufs.aperture_buffer)
-    apply_image!(dst, ibufs, ts.brightness, psf_norm)
+    apply_truesky!(dst, ibufs, ts.brightness, psf_norm)
 end
-function apply_image!(dst, ibufs::ImagingBuffers, ds::DoubleSystem, psf_norm)
+function apply_truesky!(dst, ibufs::OpticalBuffers, ds::DoubleSystem, psf_norm)
     img = ibufs.focal_buffer
     @assert all(abs.(ds.rel_position) .< size(img)[1:2] .÷ 2)
     @assert size(dst)[1:2] == image_size(ibufs)
@@ -259,9 +259,9 @@ function apply_image!(dst, ibufs::ImagingBuffers, ds::DoubleSystem, psf_norm)
     s1_dest, s1_src = o1 > 0 ? (o1 + 1:size(img, 1), 1:size(img, 1) - o1) : (1:size(img, 1) + o1, -o1 + 1:size(img, 1))
     s2_dest, s2_src = o2 > 0 ? (o2 + 1:size(img, 2), 1:size(img, 2) - o2) : (1:size(img, 2) + o2, -o2 + 1:size(img, 2))
     @views @. img[s1_dest, s2_dest, :] += img[s1_src, s2_src, :] * ds.intensity
-    apply_image!(dst, ibufs, ds.brightness, psf_norm * (1 + ds.intensity))
+    apply_truesky!(dst, ibufs, ds.brightness, psf_norm * (1 + ds.intensity))
 end
-function apply_image!(dst, ibufs::ImagingBuffers, pt::PointSource, psf_norm)
+function apply_truesky!(dst, ibufs::OpticalBuffers, pt::PointSource, psf_norm)
     img = ibufs.focal_buffer
     @assert maximum(abs ∘ imag, img) / maximum(abs ∘ real, img) < 1e-5
     @assert all(x -> real(x) ≥ 0, img)
@@ -303,36 +303,78 @@ end
 CircularAperture(sz::NTuple{2}, radius=minimum((sz .- 1) .÷ 2); kw...) =
     CircularAperture(Float64, sz, radius; kw...)
 
+struct ImgBufSerial{BT<:OpticalBuffers, FT<:Real, AT<:AbstractArray}
+    buf::BT
+    psf_norm::FT
+    img_tensor::AT
+end
+image_size(img_buf::ImgBufSerial) = image_size(img_buf.buf)
+image_type(img_buf::ImgBufSerial) = eltype(img_buf.img_tensor)
 function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, batch::Int, deviceadapter) where T
-    return ImagingBuffers(
-        adapt(deviceadapter, img_spec),
-        adapt(deviceadapter, prepare_blur(img_spec)),
-        batch),
-    adapt(deviceadapter, zeros(T, img_spec.img_size..., batch))
+    img_spec_adapt = adapt(deviceadapter, img_spec)
+    rblur_adapt = adapt(deviceadapter, prepare_blur(img_spec_adapt))
+    ImgBufSerial(
+        OpticalBuffers(img_spec_adapt, rblur_adapt, batch),
+        psf_norm(img_spec),
+        adapt(deviceadapter, zeros(T, img_spec.img_size..., batch)))
 end
-@inline function imagephases!(real_img, img_buf_tuple::Tuple, phase_buf, true_sky, psf_norm)
-    img_buf, real_img_buf = img_buf_tuple
-    psf!(img_buf, phase_buf)
-    apply_image!(real_img_buf, img_buf, true_sky, psf_norm)
-    copyto!(real_img, real_img_buf)
+@inline function imagephases!(img_array, img_buf::ImgBufSerial, phase_buf, true_sky)
+    psf!(img_buf.buf, phase_buf)
+    apply_truesky!(img_buf.img_tensor, img_buf.buf, true_sky, img_buf.psf_norm)
+    copyto!(img_array, img_buf.img_tensor)
 end
-function prepare_imgbuffers(::Type, img_spec::ImagingSpec, ::Int, ::Type{<:Array})
-    imgbuf1 = ImagingBuffers(img_spec, 1)
+
+struct ImgBufParallel{T<:Real,BT<:OpticalBuffers,FT<:Real}
+    bufs::Vector{BT}
+    psf_norm::FT
+end
+ImgBufParallel(bufs::Vector{BT}, psf_norm::FT, ::Type{T}) where {T,BT<:OpticalBuffers,FT} =
+    ImgBufParallel{T,BT,FT}(bufs, psf_norm)
+image_size(img_buf::ImgBufParallel) = image_size(img_buf.bufs[1])
+image_type(::ImgBufParallel{T}) where T = T
+function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, ::Int, ::Type{<:Array}) where T
+    imgbuf1 = OpticalBuffers(img_spec, 1)
     img_buf_vector = Array{typeof(imgbuf1)}(undef, Threads.nthreads())
     img_buf_vector[1] = imgbuf1
     Threads.@threads for i in 2:Threads.nthreads()
-        img_buf_vector[i] = ImagingBuffers(img_spec, 1)
+        img_buf_vector[i] = OpticalBuffers(img_spec, 1)
     end
-    return img_buf_vector
+    return ImgBufParallel(img_buf_vector, psf_norm(img_spec), T)
 end
-@inline function imagephases!(real_img, img_buf_vector::Vector, phase_buf, true_sky, psf_norm)
-    Threads.@threads for i in eachindex(img_buf_vector)
-        img_buffs = img_buf_vector[i]
-        for j in i:length(img_buf_vector):size(phase_buf, 3)
+@inline function imagephases!(img_array, img_buf::ImgBufParallel, phase_buf, true_sky)
+    Threads.@threads for i in eachindex(img_buf.bufs)
+        img_buffs = img_buf.bufs[i]
+        for j in i:length(img_buf.bufs):size(phase_buf, 3)
             psf!(img_buffs, view(phase_buf, :, :, j))
-            apply_image!(view(real_img, :, :, j), img_buffs, true_sky, psf_norm)
+            apply_truesky!(view(img_array, :, :, j), img_buffs, true_sky, img_buf.psf_norm)
         end
     end
+end
+
+function simulation_run!!(img_dataset, phs_dataset, phasebuffers, imgbuffers, truesky_adapt; n, verbose=true)
+    img_size = image_size(imgbuffers)
+    phs_size = plate_size(phasebuffers)
+    batch = batch_length(phasebuffers)
+    image_buf_h5 = zeros(image_type(imgbuffers), img_size..., batch)
+    phase_buf_h5 = zeros(phase_type(phasebuffers), phs_size..., batch)
+    p = Progress(n, desc="Simulating images", enabled=verbose, dt=1)
+    for j in 1:cld(n, batch)
+        phases = samplephases!(phasebuffers)
+        imagephases!(image_buf_h5, imgbuffers, phases, truesky_adapt)
+        if img_dataset !== nothing
+            HDF5.write_chunk(img_dataset, j - 1, image_buf_h5)
+        end
+        if phs_dataset !== nothing
+            if phases isa Array
+                HDF5.write_chunk(phs_dataset, j - 1, phases)
+            else
+                copy!(phase_buf_h5, phases)
+                HDF5.write_chunk(phs_dataset, j - 1, phase_buf_h5)
+            end
+        end
+        next!(p, step=min(batch, n - (j - 1) * batch))
+    end
+    finish!(p)
 end
 
 """
@@ -359,9 +401,9 @@ the results to an HDF5 file.
 - `deviceadapter`: adapter for device-backed arrays (defaults to `Array`). To use GPU arrays,
   pass e.g. `CUDA.CuArray` here (requires CUDA.jl).
 """
-function simulate_images(::Type{T}, img_spec::ImagingSpec{FT}, atm_spec::AtmosphereSpec{FT2},
+function simulate_images(::Type{T}, img_spec::ImagingSpec{FT}, atm_spec::AtmosphereSpec,
     truesky::TrueSky=PointSource(); n::Int, batch::Int=DEFAULT_BATCH, filename="simulation.h5", verbose=true,
-    savephases::Bool=true, deviceadapter=Array, write=true) where {T,FT,FT2}
+    savephases::Bool=true, deviceadapter=Array) where {T,FT}
     if !isfinite_photons(truesky) && T <: Integer
         throw(ArgumentError("Integer image eltype not compatible with infinite-photon true sky model."))
     end
@@ -376,8 +418,7 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec{FT}, atm_spec::Atmosph
 
     batch = min(batch, n)
     img_size = image_size(img_spec)
-    real_img = zeros(T, img_size..., batch)
-    spec_psf_norm = psf_norm(img_spec)
+    phs_size = plate_size(atm_spec)
     truesky_adapt = adapt(deviceadapter, convert(TrueSky{FT}, truesky))
     phasebuffers = prepare_phasebuffers(atm_spec, batch, deviceadapter)
     imgbuffers = prepare_imgbuffers(T, img_spec, batch, deviceadapter)
@@ -385,27 +426,13 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec{FT}, atm_spec::Atmosph
     h5open(filename, "w") do fid
         fid["aperture"] = img_spec.aperture
         img_dataset = create_dataset(fid, "images", T, (img_size..., n), chunk=(img_size..., batch))
-        p = Progress(n, desc="Simulating images", enabled=verbose, dt=1)
         if savephases
-            phs_size = plate_size(phasebuffers)
-            phs_dataset = create_dataset(fid, "phases", FT2, (phs_size..., n), chunk=(phs_size..., batch))
-            phase_buf_h5 = zeros(FT2, phs_size..., batch)
+            phs_dataset = create_dataset(fid, "phases", phase_type(phasebuffers), (phs_size..., n), chunk=(phs_size..., batch))
+        else
+            phs_dataset = nothing
         end
-        for j in 1:cld(n, batch)
-            phases = samplephases!(phasebuffers)
-            imagephases!(real_img, imgbuffers, phases, truesky_adapt, spec_psf_norm)
-            HDF5.write_chunk(img_dataset, j - 1, real_img)
-            if savephases
-                if phases isa Array
-                    HDF5.write_chunk(phs_dataset, j - 1, phases)
-                else
-                    copy!(phase_buf_h5, phases)
-                    HDF5.write_chunk(phs_dataset, j - 1, phase_buf_h5)
-                end
-            end
-            next!(p, step=min(batch, n - (j - 1) * batch))
-        end
-        finish!(p)
+        simulation_run!!(img_dataset, phs_dataset, phasebuffers, imgbuffers, truesky_adapt;
+            n=n, verbose=verbose)
     end
 end
 simulate_images(img_spec::ImagingSpec, phase_sampler::AtmosphereSpec, true_sky::TrueSky=PointSource(); kwargs...) =

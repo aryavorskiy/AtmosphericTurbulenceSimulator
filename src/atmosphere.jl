@@ -49,6 +49,7 @@ end
 plate_size(sampler::KarhunenLoeveBuffers) = sampler.shape
 batch_length(sampler::KarhunenLoeveBuffers) = size(sampler.noise_buffer, 2)
 out_buffer(sampler::KarhunenLoeveBuffers) = reshape(sampler.out_buffer, (sampler.shape..., size(sampler.out_buffer, 2)))
+phase_type(sampler) = eltype(out_buffer(sampler))
 function samplephases!(sampler::KarhunenLoeveBuffers)
     randn!(sampler.noise_buffer)
     mul!(sampler.out_buffer, sampler.noise_transform, sampler.noise_buffer)
