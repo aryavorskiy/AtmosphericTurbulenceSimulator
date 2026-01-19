@@ -64,24 +64,24 @@ using AtmosphericTurbulenceSimulator
 
 # 64×64 grid, radius 30 pixels
 aperture = CircularAperture((64, 64), 30) 
-img_spec = ImagingSpec(aperture, FilterSpec(550, bandpass=40), nyquist_oversample=1.5)
+img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200), filter_spec=FilterSpec(550, bandpass=40))
 nothing # hide
 ```
 
-The [`ImagingSpec`](@ref) combines the aperture with detector parameters. The `nyquist_oversample` parameter controls image sampling relative to the Nyquist limit (which is twice the diffraction limit), and the [`FilterSpec`](@ref) is used to define wavelength and bandpass. 
+The [`ImagingSpec`](@ref) combines the aperture with detector parameters. The [`PhotonCount`](@ref) is used to define the photon budget, while the [`FilterSpec`](@ref) is used to define wavelength and bandpass. You can also specify the photon budget with the `nphotons` and `background` keywords.
 
 Note that the Nyquist oversampling affects the PSF size, so it does not match the aperture grid size directly. You can specify the imaging grid size explicitly by passing it as a positional argument to [`ImagingSpec`](@ref).
 
 !!! note
     The non-monochromatic PSF simulation assumes the telescope itself is achromatic, i.e., the aperture function does not depend on wavelength. The wavelength dependence only enters through the Fried parameter ``r_0(\lambda) \propto \lambda^{6/5}`` and the diffraction limit ``\lambda / D``. This is a good approximation only for narrow bands.
 
-For the true sky, use [`PointSource`](@ref) for a single point source, [`DoubleSystem`](@ref) for a binary, or [`TrueSkyImage`](@ref) for arbitrary extended objects. The brightness can be specified as a finite photon count (Poisson-sampled) or infinite (continuous flux):
+For the true sky, use [`PointSource`](@ref) for a single point source, [`DoubleSystem`](@ref) for a binary, or [`TrueSkyImage`](@ref) for arbitrary extended objects:
 
 ```@example psf_simulation
-# Point source: 1e7 photons total, 200 photons/pixel background
-ts_point = PointSource(1e7, 200)
-# Binary system: secondary offset by (5, 3) pixels, 0.5× intensity
-ts_double = DoubleSystem((5, 3), 0.5; nphotons = 1e7, background = 200)
+# Point source
+ts_point = PointSource()
+# Binary system
+ts_double = DoubleSystem((5, 3), 0.5)
 # Custom image from array
 img = zeros(Float32, 128, 128)
 img[65, 65] = 1.0  # single bright pixel at center
@@ -89,7 +89,7 @@ for _ in 1:5
     # random companions around the center
     img[65 + rand(-32:32), 65 + rand(-32:32)] += rand() * 0.1 + 0.05
 end
-ts_image = TrueSkyImage(img; nphotons=1e7, background=200)
+ts_image = TrueSkyImage(img)
 nothing # hide
 ```
 

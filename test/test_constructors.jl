@@ -50,48 +50,38 @@
 
     @testset "ImagingSpec" begin
         ap = CircularAperture((32, 32), 15)
-        img_spec = ImagingSpec(ap)
+        img_spec = ImagingSpec(ap; nphotons=Inf)
         @test size(img_spec.aperture) == (32, 32)
         @test img_spec.img_size == (64, 64)
 
-        img_spec_custom = ImagingSpec(ap, nyquist_oversample=1.5)
+        img_spec_custom = ImagingSpec(ap; nphotons=Inf, nyquist_oversample=1.5)
         @test img_spec_custom.img_size == (96, 96)
 
         # Test with filter
         filter = FilterSpec(500.0; bandpass=100.0)
-        img_spec_filter = ImagingSpec(ap, filter)
+        img_spec_filter = ImagingSpec(ap; nphotons=Inf, filter_spec=filter)
         @test img_spec_filter.filter_spec.base_wavelength == 500.0
     end
 
     @testset "TrueSky models" begin
         # Test PointSource
-        ps_finite = PointSource(1e7, 200)
-        @test ps_finite.nphotons == 1e7
-        @test ps_finite.background == 200
-        @test AtmosphericTurbulenceSimulator.isfinite_photons(ps_finite)
-        ps_inf = PointSource()
-        @test !AtmosphericTurbulenceSimulator.isfinite_photons(ps_inf)
-
-        ps_f32 = convert(AtmosphericTurbulenceSimulator.TrueSky{Float32}, ps_finite)
-        @test ps_f32.nphotons isa Float32
+        ps = PointSource()
+        @test ps isa PointSource
 
         # Test DoubleSystem
-        ds = DoubleSystem((5, 3), 0.5; nphotons=1e7, background=100)
+        ds = DoubleSystem((5, 3), 0.5)
         @test ds.rel_position == (5, 3)
         @test ds.intensity == 0.5
-        @test ds.brightness.nphotons == 1e7
-        @test ds.brightness.background == 100
 
-        ds_f32 = convert(AtmosphericTurbulenceSimulator.TrueSky{Float32}, ds)
+        ds_f32 = DoubleSystem((5, 3), Float32(0.5))
         @test ds_f32.intensity isa Float32
 
         # Test TrueSkyImage
         test_image = rand(32, 32)
-        ts_img = TrueSkyImage(test_image; nphotons=Inf)
+        ts_img = TrueSkyImage(test_image)
         @test size(ts_img.true_sky_fft) == (32, 32)
-        @test !AtmosphericTurbulenceSimulator.isfinite_photons(ts_img)
 
-        ts_img_f32 = convert(AtmosphericTurbulenceSimulator.TrueSky{Float32}, ts_img)
+        ts_img_f32 = TrueSkyImage(convert.(Float32, test_image))
         @test eltype(ts_img_f32.true_sky_fft) == ComplexF32
     end
 end

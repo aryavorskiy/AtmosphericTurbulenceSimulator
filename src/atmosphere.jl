@@ -246,18 +246,6 @@ function simulate_phases(atm_spec::AtmosphereSpec{FT}; n::Int, batch::Int=DEFAUL
     h5open(filename, "w") do fid
         phs_size = plate_size(atm_spec)
         phs_dataset = create_dataset(fid, "phases", FT, (phs_size..., n), chunk=(phs_size..., batch))
-        p = Progress(n, desc="Simulating phases", enabled=verbose, dt=1)
-        phase_buf_h5 = zeros(FT, phs_size..., batch)
-        for j in 1:cld(n, batch)
-            phases = samplephases!(phasebuffers)
-            if phases isa Array
-                HDF5.write_chunk(phs_dataset, j - 1, phases)
-            else
-                copy!(phase_buf_h5, phases)
-                HDF5.write_chunk(phs_dataset, j - 1, phase_buf_h5)
-            end
-            next!(p, step=min(batch, n - (j - 1) * batch))
-        end
-        finish!(p)
+        simulation_run!!(nothing, phs_dataset, phasebuffers, nothing, nothing, n=n, verbose=verbose)
     end
 end

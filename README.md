@@ -59,20 +59,20 @@ specification and a true-sky model:
 ```julia
 # Define circular aperture and imaging parameters
 ap = CircularAperture((64, 64), 25)
-img_spec = ImagingSpec(ap, nyquist_oversample=1)
+img_spec = ImagingSpec(ap, nphotons=1e6, background=100)
 
 # Atmosphere specification
 atm = SingleLayer((64, 64), 0.2 / 2 * 64, interpolate=:auto)
 
 # True sky models:
-# Point source with 1e7 total photons and 200 photons/pixel background
-ts_point = PointSource(1e7, 200)
+# Point source
+ts_point = PointSource()
 
 # Binary system: secondary offset by (5, 3) pixels with 0.5× intensity
-ts_double = DoubleSystem((5, 3), 0.5; nphotons=1e7, background=200)
+ts_double = DoubleSystem((5, 3), 0.5)
 
 # Custom image from array
-# ts_image = TrueSkyImage(my_image_array; nphotons=Inf)
+# ts_image = TrueSkyImage(my_image_array)
 
 # Simulate images and save to HDF5 (includes phase screens by default)
 simulate_images(img_spec, atm, ts_point; n=3000, filename="simulation.h5")

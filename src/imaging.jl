@@ -24,6 +24,7 @@ end
 FilterSpec(base_wavelength::T1, wavelengths::AbstractVector{T2},
     intensities::AbstractVector{T3}=ones(Int, length(wavelengths))) where {T1,T2,T3} =
     FilterSpec{promote_type(T1, T2, T3)}(base_wavelength, wavelengths, intensities)
+MonochromaticFilterSpec(::Type{T}=Int) where T = FilterSpec{T}(1, [1], [1])
 
 """
     FilterSpec([T, ]base_wavelength; bandpass, tcenter=1, tedge=1, npts=7)
@@ -81,124 +82,138 @@ function prepare_spmat(::Type{T}, img_size, bspec::FilterSpec) where T<:Real
     return sparse(is, js, vs, nx * ny, nx * ny)
 end
 
-abstract type TrueSky{T} end
-
 """
-    PointSource(nphotons[, background])
-    PointSource([;nphotons, background])
+    PhotonCount(nphotons[, background])
 
-Simple true-sky brightness model. When `nphotons` is finite the simulator will
-Poisson-sample pixel values according to the PSF-normalized flux with added background; if `nphotons` is
-`Inf` the continuous flux is used (no shot noise), and background is ignored.
-
-# Arguments
-- `nphotons`: total photons for the source (or `Inf` for continuous mode). Defaults to `Inf`.
-- `background`: constant background added to the flux in photons per pixel. Ignored in
-    continuous mode, defaults to `1.0` otherwise.
+Specifies the photon budget for imaging simulations. Set `nphotons` to `Inf` for
+continuous flux (`background` can be omitted in this case).
 """
-@kwdef struct PointSource{T} <: TrueSky{T}
-    nphotons::T=Inf
-    background::T=1.0
+struct PhotonCount{T<:Real}
+    nphotons::T
+    background::T
 end
-PointSource(nphotons::T1, background::T2) where {T1<:Real,T2<:Real} =
-    return PointSource{promote_type(T1, T2)}(nphotons, background)
-Base.convert(::Type{TrueSky{T}}, b::PointSource) where {T<:Real} =
-    PointSource{T}(b.nphotons, b.background)
-isfinite_photons(ts::PointSource) = isfinite(ts.nphotons)
+PhotonCount(nphotons::T1, background::T2) where {T1<:Real,T2<:Real} =
+    return PhotonCount{promote_type(T1, T2)}(nphotons, background)
+PhotonCount(nphotons::Real) = if isinf(nphotons)
+    PhotonCount(Inf, zero(Float64))
+else
+    throw(ArgumentError("Must specify background when `nphotons` is finite"))
+end
+Base.convert(::Type{PhotonCount{T}}, pc::PhotonCount) where T<:Real =
+    PhotonCount{T}(pc.nphotons, pc.background)
+isfinite_photons(pc::PhotonCount) = isfinite(pc.nphotons)
+
+abstract type TrueSky end
 
 """
-    DoubleSystem(rel_position, intensity[; nphotons, background])
+    PointSource()
+
+Simple true-sky brightness model. The photon budget and background are configured
+via the `ImagingSpec.photon_count` field. See [`ImagingSpec`](@ref) for details on
+configuring photon budget and background.
+"""
+struct PointSource <: TrueSky end
+
+"""
+    DoubleSystem(rel_position, intensity)
 
 Model for a two-component source (binary): primary plus a secondary offset by `rel_position`.
-`nphotons` and `background` describe the brightness of the primary component; the default is
-continuous flux, see [`PointSource`](@ref) for more info.
+The photon budget and background are configured via the `ImagingSpec.photon_count` field.
+See [`ImagingSpec`](@ref) for details.
 
 # Arguments
 - `rel_position`: `(dx, dy)` integer tuple specifying the secondary's pixel offset.
 - `intensity`: multiplicative intensity of the secondary relative to the primary.
 """
-struct DoubleSystem{T} <: TrueSky{T}
+struct DoubleSystem{T} <: TrueSky
     rel_position::NTuple{2,Int}
     intensity::T
-    brightness::PointSource{T}
-    DoubleSystem(position, intensity::Real, brightness::PointSource) =
-        new{typeof(intensity)}(Tuple(position), intensity, convert(TrueSky{typeof(intensity)}, brightness))
+    DoubleSystem(position, intensity::Real) =
+        new{typeof(intensity)}(Tuple(position), intensity)
 end
-DoubleSystem(position, intensity::Real; kw...) =
-    DoubleSystem(position, intensity, PointSource(; kw...))
-
-Base.convert(::Type{TrueSky{T}}, b::DoubleSystem) where {T<:Real} =
-    DoubleSystem(b.rel_position, T(b.intensity), convert(TrueSky{T}, b.brightness))
-isfinite_photons(ds::DoubleSystem) = isfinite_photons(ds.brightness)
 
 """
-    TrueSkyImage(true_sky::AbstractMatrix{T}[; nphotons, background])
+    TrueSkyImage(true_sky::AbstractMatrix{T})
 
-Wrap a real-valued true-sky image for use with the imaging pipeline. `nphotons` and
-`background` describe the brightness of the source; the default is continuous flux, see
-[`PointSource`](@ref) for more info.
+Wrap a real-valued true-sky image for use with the imaging pipeline. The photon budget and
+background are configured via the `ImagingSpec.photon_count` field. See [`ImagingSpec`](@ref)
+for details.
 
 # Arguments
 - `true_sky`: real image array representing spatial sky brightness.
 """
-struct TrueSkyImage{T, MT<:AbstractMatrix{Complex{T}}} <: TrueSky{T}
+struct TrueSkyImage{MT<:AbstractMatrix{<:Complex}} <: TrueSky
     true_sky_fft::MT
-    brightness::PointSource{T}
 end
-function TrueSkyImage(true_sky::AbstractMatrix{T}, brightness=PointSource()) where {T<:Real}
+function TrueSkyImage(true_sky::AbstractMatrix{T}) where {T<:Real}
     true_sky_fft = ifft(ifftshift(true_sky))
     true_sky_fft ./= true_sky_fft[1, 1]  # normalize DC component to 1
-    return TrueSkyImage{T, typeof(true_sky_fft)}(true_sky_fft, convert(TrueSky{T}, brightness))
+    return TrueSkyImage{typeof(true_sky_fft)}(true_sky_fft)
 end
-TrueSkyImage(mat::AbstractMatrix; kw...) =
-    TrueSkyImage(mat, PointSource(; kw...))
-Base.convert(::Type{TrueSky{T}}, b::TrueSkyImage) where {T<:Real} =
-    TrueSkyImage(convert.(Complex{T}, b.true_sky_fft), convert(TrueSky{T}, b.brightness))
 Adapt.adapt_structure(to, ts::TrueSkyImage) =
-    TrueSkyImage(Adapt.adapt_storage(to, ts.true_sky_fft), ts.brightness)
-isfinite_photons(ts::TrueSkyImage) = isfinite_photons(ts.brightness)
+    TrueSkyImage(Adapt.adapt_storage(to, ts.true_sky_fft))
 
 """
     ImagingSpec
 
-Container describing the imaging system configuration. It is defined by the aperture function,
-the specification of the filter and the output image size. If the image size does not match the
-aperture size, the aperture is zero-padded accordingly.
-
----
-    ImagingSpec(aperture, [img_size, filter_spec; nyquist_oversample=1])
-
-# Arguments
-- `aperture`: 2D aperture (pupil) array describing the telescope pupil.
-- `img_size`: output image size `(nx, ny)`. If not provided, it is computed as double the
-  size of the aperture times the `nyquist_oversample` factor.
-- `filter_spec`: `FilterSpec` instance describing spectral sampling and relative intensities.
+Container for the imaging system configuration. It is defined by the telescope `aperture`, the
+source brightness via `photon_count`, an optional spectral `filter_spec`, and the output `img_size`.
+If `img_size` does not match the aperture’s Nyquist grid, the aperture is zero-padded accordingly.
 """
 struct ImagingSpec{T, AT<:AbstractMatrix{T}}
     aperture::AT
-    img_size::NTuple{2,Int}
+    photon_count::PhotonCount{T}
     filter_spec::FilterSpec{T}
+    img_size::NTuple{2,Int}
 end
-ImagingSpec(aperture::AbstractMatrix{T}, imsize::NTuple{2,Int}, bspec::FilterSpec) where T<:Real =
-    ImagingSpec{T, typeof(aperture)}(aperture, imsize, convert(FilterSpec{T}, bspec))
-ImagingSpec(aperture, imsize::NTuple{2,Int}) =
-    ImagingSpec(aperture, imsize, FilterSpec{eltype(aperture)}(1, [1], [1]))
-ImagingSpec(aperture, filter_spec=FilterSpec(1, [1], [1]); nyquist_oversample=1) =
-    ImagingSpec(aperture, round.(Int, size(aperture) .* 2 .* nyquist_oversample),
-        convert(FilterSpec{eltype(aperture)}, filter_spec))
+
+"""
+    ImagingSpec([T, ]aperture, photon_count[; filter_spec, nyquist_oversample, img_size])
+    ImagingSpec([T, ]aperture; nphotons, [background, filter_spec, nyquist_oversample, img_size])
+
+Create an imaging system specification.
+
+# Arguments
+- `T`: desired numeric element type, inferred from `aperture` if not provided.
+- `aperture`: 2D aperture (pupil) array describing the telescope pupil.
+- `photon_count`: `PhotonCount` instance describing the photon budget and background.
+
+# Keyword Arguments
+- `filter_spec`: `FilterSpec` describing sampled wavelengths and their relative intensities.
+  Defaults to a monochromatic filter.
+- `nyquist_oversample`: multiplicative factor applied to the default Nyquist image size (`2 * size(aperture)`).
+  Defaults to 1. Ignored if `img_size` is provided.
+- `img_size`: explicit output image size `(nx, ny)`. If not provided, computed from aperture size
+  and `nyquist_oversample`.
+- `nphotons` and `background`: alternative way to specify photon budget and background
+  when `photon_count` is not provided.
+"""
+function ImagingSpec(aperture::AbstractMatrix{T}, photon_count::PhotonCount;
+    filter_spec::FilterSpec=MonochromaticFilterSpec(), nyquist_oversample::Real=1,
+    img_size::NTuple{2,Int}=round.(Int, size(aperture) .* 2 .* nyquist_oversample)) where T<:Real
+    fs = convert(FilterSpec{T}, filter_spec)
+    pc = convert(PhotonCount{T}, photon_count)
+    return ImagingSpec{T, typeof(aperture)}(aperture, pc, fs, img_size)
+end
+ImagingSpec(aperture::AbstractMatrix; nphotons, background=1, kw...) =
+    ImagingSpec(aperture, PhotonCount(nphotons, background); kw...)
+ImagingSpec(::Type{T}, aperture::AbstractMatrix, args...; kw...) where T<:Real =
+    ImagingSpec(convert.(T, aperture), args...; kw...)
+
 Adapt.adapt_structure(to, imgspec::ImagingSpec) =
-    ImagingSpec(Adapt.adapt_storage(to, imgspec.aperture), imgspec.img_size, imgspec.filter_spec)
+    ImagingSpec(Adapt.adapt_storage(to, imgspec.aperture), imgspec.photon_count, imgspec.filter_spec, imgspec.img_size)
 plate_size(img_spec::ImagingSpec) = size(img_spec.aperture)
 image_size(img_spec::ImagingSpec) = img_spec.img_size
 psf_norm(img_spec::ImagingSpec) = sum(abs2, img_spec.aperture) * prod(img_spec.img_size) *
         sum(img_spec.filter_spec.intensities)
 
-struct OpticalBuffers{AT, BT, MT, PT}
+struct OpticalBuffers{AT, BT, MT, PT, PCT<:PhotonCount}
     aperture::AT
     radial_blur::BT
     aperture_buffer::MT
     focal_buffer::MT
     fftplan::PT
+    photon_count::PCT
 end
 plate_size(bufs::OpticalBuffers) = size(bufs.aperture)
 image_size(bufs::OpticalBuffers) = size(bufs.aperture_buffer)[1:2]
@@ -208,7 +223,7 @@ function OpticalBuffers(imgspec::ImagingSpec, blur, batch::Int)
     complex_type = complex(eltype(imgspec.aperture))
     buf1 = similar(imgspec.aperture, complex_type, imgspec.img_size..., batch)
     buf2 = similar(imgspec.aperture, complex_type, imgspec.img_size..., batch)
-    return OpticalBuffers(imgspec.aperture, blur, buf1, buf2, plan_fft(buf1, (1, 2)))
+    return OpticalBuffers(imgspec.aperture, blur, buf1, buf2, plan_fft(buf1, (1, 2)), imgspec.photon_count)
 end
 function prepare_blur(imgspec::ImagingSpec)
     if length(imgspec.filter_spec.wavelengths) > 1
@@ -244,33 +259,36 @@ function psf!(bufs::OpticalBuffers, phases)
     radial_blur!(bufs.focal_buffer, bufs.aperture_buffer, bufs.radial_blur)
 end
 
-function apply_truesky!(dst, ibufs::OpticalBuffers, ts::TrueSkyImage, psf_norm)
-    mul!(ibufs.aperture_buffer, ibufs.fftplan, ibufs.focal_buffer)
-    ibufs.aperture_buffer .*= ts.true_sky_fft
-    ldiv!(ibufs.focal_buffer, ibufs.fftplan, ibufs.aperture_buffer)
-    apply_truesky!(dst, ibufs, ts.brightness, psf_norm)
+function readout!(dst::AbstractArray, img::AbstractArray, pc::PhotonCount, psf_norm)
+    @assert maximum(abs ∘ imag, img) / maximum(abs ∘ real, img) < 1e-5
+    @assert all(x -> real(x) ≥ 0, img)
+    if isfinite_photons(pc)
+        @. dst = rand(Poisson(real(img) / psf_norm * pc.nphotons + pc.background))
+    else
+        @. dst = img / psf_norm
+    end
 end
-function apply_truesky!(dst, ibufs::OpticalBuffers, ds::DoubleSystem, psf_norm)
-    img = ibufs.focal_buffer
+function apply_truesky!(dst, opt_buf::OpticalBuffers, ts::TrueSkyImage, psf_norm)
+    mul!(opt_buf.aperture_buffer, opt_buf.fftplan, opt_buf.focal_buffer)
+    opt_buf.aperture_buffer .*= ts.true_sky_fft
+    ldiv!(opt_buf.focal_buffer, opt_buf.fftplan, opt_buf.aperture_buffer)
+    readout!(dst, opt_buf.focal_buffer, opt_buf.photon_count, psf_norm)
+end
+function apply_truesky!(dst, opt_buf::OpticalBuffers, ds::DoubleSystem, psf_norm)
+    img = opt_buf.focal_buffer
     @assert all(abs.(ds.rel_position) .< size(img)[1:2] .÷ 2)
-    @assert size(dst)[1:2] == image_size(ibufs)
-    @assert size(dst, 3) == batch_length(ibufs)
+    @assert size(dst)[1:2] == image_size(opt_buf)
+    @assert size(dst, 3) == batch_length(opt_buf)
     o1, o2 = ds.rel_position
     s1_dest, s1_src = o1 > 0 ? (o1 + 1:size(img, 1), 1:size(img, 1) - o1) : (1:size(img, 1) + o1, -o1 + 1:size(img, 1))
     s2_dest, s2_src = o2 > 0 ? (o2 + 1:size(img, 2), 1:size(img, 2) - o2) : (1:size(img, 2) + o2, -o2 + 1:size(img, 2))
     @views @. img[s1_dest, s2_dest, :] += img[s1_src, s2_src, :] * ds.intensity
-    apply_truesky!(dst, ibufs, ds.brightness, psf_norm * (1 + ds.intensity))
+    readout!(dst, img, opt_buf.photon_count, psf_norm * (1 + ds.intensity))
 end
-function apply_truesky!(dst, ibufs::OpticalBuffers, pt::PointSource, psf_norm)
-    img = ibufs.focal_buffer
-    @assert maximum(abs ∘ imag, img) / maximum(abs ∘ real, img) < 1e-5
-    @assert all(x -> real(x) ≥ 0, img)
-    if isfinite(pt.nphotons)
-        @. dst = rand(Poisson(real(img) / psf_norm * pt.nphotons + pt.background))
-    else
-        @. dst = real(img) / psf_norm
-    end
+function apply_truesky!(dst, opt_buf::OpticalBuffers, ::PointSource, psf_norm)
+    readout!(dst, opt_buf.focal_buffer, opt_buf.photon_count, psf_norm)
 end
+
 
 """
     CircularAperture([T, ]sz, radius[; aa_dist=1])
@@ -304,11 +322,11 @@ CircularAperture(sz::NTuple{2}, radius=minimum((sz .- 1) .÷ 2); kw...) =
     CircularAperture(Float64, sz, radius; kw...)
 
 struct ImgBufSerial{BT<:OpticalBuffers, FT<:Real, AT<:AbstractArray}
-    buf::BT
+    opt_buf::BT
     psf_norm::FT
     img_tensor::AT
 end
-image_size(img_buf::ImgBufSerial) = image_size(img_buf.buf)
+image_size(img_buf::ImgBufSerial) = image_size(img_buf.opt_buf)
 image_type(img_buf::ImgBufSerial) = eltype(img_buf.img_tensor)
 function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, batch::Int, deviceadapter) where T
     img_spec_adapt = adapt(deviceadapter, img_spec)
@@ -318,51 +336,55 @@ function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, batch::Int, device
         psf_norm(img_spec),
         adapt(deviceadapter, zeros(T, img_spec.img_size..., batch)))
 end
-@inline function imagephases!(img_array, img_buf::ImgBufSerial, phase_buf, true_sky)
-    psf!(img_buf.buf, phase_buf)
-    apply_truesky!(img_buf.img_tensor, img_buf.buf, true_sky, img_buf.psf_norm)
+@inline function compute_images!(img_array, img_buf::ImgBufSerial, phases, true_sky)
+    psf!(img_buf.opt_buf, phases)
+    apply_truesky!(img_buf.img_tensor, img_buf.opt_buf, true_sky, img_buf.psf_norm)
     copyto!(img_array, img_buf.img_tensor)
 end
 
 struct ImgBufParallel{T<:Real,BT<:OpticalBuffers,FT<:Real}
-    bufs::Vector{BT}
+    opt_bufs::Vector{BT}
     psf_norm::FT
 end
 ImgBufParallel(bufs::Vector{BT}, psf_norm::FT, ::Type{T}) where {T,BT<:OpticalBuffers,FT} =
     ImgBufParallel{T,BT,FT}(bufs, psf_norm)
-image_size(img_buf::ImgBufParallel) = image_size(img_buf.bufs[1])
+image_size(img_buf::ImgBufParallel) = image_size(img_buf.opt_bufs[1])
 image_type(::ImgBufParallel{T}) where T = T
 function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, ::Int, ::Type{<:Array}) where T
     imgbuf1 = OpticalBuffers(img_spec, 1)
-    img_buf_vector = Array{typeof(imgbuf1)}(undef, Threads.nthreads())
-    img_buf_vector[1] = imgbuf1
+    opt_buf_vector = Array{typeof(imgbuf1)}(undef, Threads.nthreads())
+    opt_buf_vector[1] = imgbuf1
     Threads.@threads for i in 2:Threads.nthreads()
-        img_buf_vector[i] = OpticalBuffers(img_spec, 1)
+        opt_buf_vector[i] = OpticalBuffers(img_spec, 1)
     end
-    return ImgBufParallel(img_buf_vector, psf_norm(img_spec), T)
+    return ImgBufParallel(opt_buf_vector, psf_norm(img_spec), T)
 end
-@inline function imagephases!(img_array, img_buf::ImgBufParallel, phase_buf, true_sky)
-    Threads.@threads for i in eachindex(img_buf.bufs)
-        img_buffs = img_buf.bufs[i]
-        for j in i:length(img_buf.bufs):size(phase_buf, 3)
-            psf!(img_buffs, view(phase_buf, :, :, j))
-            apply_truesky!(view(img_array, :, :, j), img_buffs, true_sky, img_buf.psf_norm)
+@inline function compute_images!(img_array, img_buf::ImgBufParallel, phases, true_sky)
+    Threads.@threads for i in eachindex(img_buf.opt_bufs)
+        op_buf = img_buf.opt_bufs[i]
+        for j in i:length(img_buf.opt_bufs):size(phases, 3)
+            psf!(op_buf, view(phases, :, :, j))
+            apply_truesky!(view(img_array, :, :, j), op_buf, true_sky, img_buf.psf_norm)
         end
     end
 end
 
-function simulation_run!!(img_dataset, phs_dataset, phasebuffers, imgbuffers, truesky_adapt; n, verbose=true)
-    img_size = image_size(imgbuffers)
-    phs_size = plate_size(phasebuffers)
-    batch = batch_length(phasebuffers)
-    image_buf_h5 = zeros(image_type(imgbuffers), img_size..., batch)
-    phase_buf_h5 = zeros(phase_type(phasebuffers), phs_size..., batch)
+function simulation_run!!(img_dataset, phs_dataset, phsbuffers, imgbuffers, truesky_adapt; n, verbose=true)
+    phs_size = plate_size(phsbuffers)
+    batch = batch_length(phsbuffers)
+    phase_buf_h5 = zeros(phase_type(phsbuffers), phs_size..., batch)
+    if imgbuffers !== nothing
+        img_size = image_size(imgbuffers)
+        image_buf_h5 = zeros(image_type(imgbuffers), img_size..., batch)
+    end
     p = Progress(n, desc="Simulating images", enabled=verbose, dt=1)
     for j in 1:cld(n, batch)
-        phases = samplephases!(phasebuffers)
-        imagephases!(image_buf_h5, imgbuffers, phases, truesky_adapt)
-        if img_dataset !== nothing
-            HDF5.write_chunk(img_dataset, j - 1, image_buf_h5)
+        phases = samplephases!(phsbuffers)
+        if imgbuffers !== nothing
+            compute_images!(image_buf_h5, imgbuffers, phases, truesky_adapt)
+            if img_dataset !== nothing
+                HDF5.write_chunk(img_dataset, j - 1, image_buf_h5)
+            end
         end
         if phs_dataset !== nothing
             if phases isa Array
@@ -386,8 +408,8 @@ the results to an HDF5 file.
 
 # Arguments
 - `T`: output image numeric type; if not provided, defaults to `Int` for
-  finite-photon true sky models and `Float64` for infinite-photon models.
-- `img_spec`: an `ImagingSpec` describing the aperture, image size and filter.
+  finite-photon simulations (determined by `img_spec.photon_count.nphotons`) and `Float64` for infinite-photon models.
+- `img_spec`: an `ImagingSpec` describing the aperture, image size, photon budget and filter.
 - `atm_spec`: an `AtmosphereSpec` used to produce phase screens.
 - `truesky`: a `TrueSky` model (e.g. `PointSource`, `DoubleSystem`, `TrueSkyImage`).
 
@@ -404,8 +426,8 @@ the results to an HDF5 file.
 function simulate_images(::Type{T}, img_spec::ImagingSpec{FT}, atm_spec::AtmosphereSpec,
     truesky::TrueSky=PointSource(); n::Int, batch::Int=DEFAULT_BATCH, filename="simulation.h5", verbose=true,
     savephases::Bool=true, deviceadapter=Array) where {T,FT}
-    if !isfinite_photons(truesky) && T <: Integer
-        throw(ArgumentError("Integer image eltype not compatible with infinite-photon true sky model."))
+    if !isfinite_photons(img_spec.photon_count) && T <: Integer
+        throw(ArgumentError("Integer image eltype not compatible with infinite-photon imaging spec."))
     end
     if plate_size(img_spec) != plate_size(atm_spec)
         throw(ArgumentError("Telescope plate size $(plate_size(img_spec)) does not match" *
@@ -419,21 +441,21 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec{FT}, atm_spec::Atmosph
     batch = min(batch, n)
     img_size = image_size(img_spec)
     phs_size = plate_size(atm_spec)
-    truesky_adapt = adapt(deviceadapter, convert(TrueSky{FT}, truesky))
-    phasebuffers = prepare_phasebuffers(atm_spec, batch, deviceadapter)
+    truesky_adapt = adapt(deviceadapter, truesky)
+    phsbuffers = prepare_phasebuffers(atm_spec, batch, deviceadapter)
     imgbuffers = prepare_imgbuffers(T, img_spec, batch, deviceadapter)
 
     h5open(filename, "w") do fid
         fid["aperture"] = img_spec.aperture
         img_dataset = create_dataset(fid, "images", T, (img_size..., n), chunk=(img_size..., batch))
         if savephases
-            phs_dataset = create_dataset(fid, "phases", phase_type(phasebuffers), (phs_size..., n), chunk=(phs_size..., batch))
+            phs_dataset = create_dataset(fid, "phases", phase_type(phsbuffers), (phs_size..., n), chunk=(phs_size..., batch))
         else
             phs_dataset = nothing
         end
-        simulation_run!!(img_dataset, phs_dataset, phasebuffers, imgbuffers, truesky_adapt;
+        simulation_run!!(img_dataset, phs_dataset, phsbuffers, imgbuffers, truesky_adapt;
             n=n, verbose=verbose)
     end
 end
 simulate_images(img_spec::ImagingSpec, phase_sampler::AtmosphereSpec, true_sky::TrueSky=PointSource(); kwargs...) =
-    simulate_images(isfinite_photons(true_sky) ? Int : Float64, img_spec, phase_sampler, true_sky; kwargs...)
+    simulate_images(isfinite_photons(img_spec.photon_count) ? Int : Float64, img_spec, phase_sampler, true_sky; kwargs...)
