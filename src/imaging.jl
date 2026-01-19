@@ -1,6 +1,6 @@
 using LinearAlgebra, FFTW, Distributions, HDF5, ProgressMeter, SparseArrays, Adapt
 
-const DEFAULT_BATCH = 512
+const DEFAULT_BATCH = 64
 
 """
     FilterSpec
@@ -24,25 +24,24 @@ end
 FilterSpec(base_wavelength::T1, wavelengths::AbstractVector{T2},
     intensities::AbstractVector{T3}=ones(Int, length(wavelengths))) where {T1,T2,T3} =
     FilterSpec{promote_type(T1, T2, T3)}(base_wavelength, wavelengths, intensities)
-MonochromaticFilterSpec(::Type{T}=Int) where T = FilterSpec{T}(1, [1], [1])
+MonoFilterSpec(::Type{T}=Int) where T = FilterSpec{T}(1, [1], [1])
 
 """
-    FilterSpec([T, ]base_wavelength; bandpass, tcenter=1, tedge=1, npts=7)
+    FilterSpec(base_wavelength; bandwidth[, tcenter=1, tedge=1, npts=7])
 
 # Arguments
 - `base_wavelength`: central wavelength for the filter (same units as `wavelengths`).
 
 # Keyword Arguments
-- `bandpass`: total width of the filter bandpass in wavelength units.
+- `bandwidth`: total width of the filter bandpass in wavelength units.
 - `tcenter`: relative intensity at the center wavelength (default 1).
 - `tedge`: relative intensity at the edges of the bandpass (default 1).
 """
-function FilterSpec(::Type{T}, base_wavelength::Real; bandpass, tcenter=1, tedge=1, npts=7) where T<:Real
-    wavelengths = range(base_wavelength - bandpass / 2, base_wavelength + bandpass / 2, length=npts)
+function FilterSpec(base_wavelength::Real; bandwidth, tcenter=1, tedge=1, npts=7)
+    wavelengths = range(base_wavelength - bandwidth / 2, base_wavelength + bandwidth / 2, length=npts)
     intensities = range(-pi/2, pi/2, length=npts) .|> x -> cos(x) * (tcenter - tedge) + tedge
-    return FilterSpec{T}(base_wavelength, wavelengths, intensities)
+    return FilterSpec(base_wavelength, wavelengths, intensities)
 end
-FilterSpec(base_wavelength::Real; kw...) = FilterSpec(Float64, base_wavelength; kw...)
 Base.convert(::Type{FilterSpec{T}}, bspec::FilterSpec) where T<:Real =
     FilterSpec{T}(bspec.base_wavelength,
         bspec.wavelengths, bspec.intensities)
@@ -189,7 +188,7 @@ Create an imaging system specification.
   when `photon_count` is not provided.
 """
 function ImagingSpec(aperture::AbstractMatrix{T}, photon_count::PhotonCount;
-    filter_spec::FilterSpec=MonochromaticFilterSpec(), nyquist_oversample::Real=1,
+    filter_spec::FilterSpec=MonoFilterSpec(), nyquist_oversample::Real=1,
     img_size::NTuple{2,Int}=round.(Int, size(aperture) .* 2 .* nyquist_oversample)) where T<:Real
     fs = convert(FilterSpec{T}, filter_spec)
     pc = convert(PhotonCount{T}, photon_count)

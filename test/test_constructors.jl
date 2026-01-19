@@ -20,14 +20,10 @@
     end
 
     @testset "FilterSpec" begin
-        # convenience constructor
-        filter = FilterSpec(500.0; bandpass=100.0, npts=5)
-        @test filter.base_wavelength == 500.0
-        @test length(filter.wavelengths) == 5
-
-        # Test type promotion
-        filter32 = FilterSpec(Float32, 500.0; bandpass=100.0)
-        @test filter32 isa FilterSpec{Float32}
+        filter = FilterSpec(500; bandwidth=100, npts=5)
+        @test filter.base_wavelength == 500
+        @test filter.wavelengths == range(450, 550, length=5)
+        @test filter.intensities == ones(5)
     end
 
     @testset "CircularAperture" begin
@@ -58,7 +54,7 @@
         @test img_spec_custom.img_size == (96, 96)
 
         # Test with filter
-        filter = FilterSpec(500.0; bandpass=100.0)
+        filter = FilterSpec(500.0; bandwidth=100.0)
         img_spec_filter = ImagingSpec(ap; nphotons=Inf, filter_spec=filter)
         @test img_spec_filter.filter_spec.base_wavelength == 500.0
     end

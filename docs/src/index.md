@@ -64,7 +64,7 @@ using AtmosphericTurbulenceSimulator
 
 # 64×64 grid, radius 30 pixels
 aperture = CircularAperture((64, 64), 30) 
-img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200), filter_spec=FilterSpec(550, bandpass=40))
+img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200), filter_spec=FilterSpec(550, bandwidth=40))
 nothing # hide
 ```
 

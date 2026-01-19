@@ -7,7 +7,7 @@ using PrecompileTools
     for (IT, T, truesky_noconv) in zip(imtypes, types, trueskys)
         aperture = CircularAperture(T, (16, 16))
         photon_count = PhotonCount(1e6, 100)
-        filter_spec = FilterSpec(T, 500; bandpass=100)
+        filter_spec = FilterSpec(500; bandwidth=100)
         img_spec = ImagingSpec(aperture, photon_count; filter_spec=filter_spec, img_size=(32, 32))
         img_buf = prepare_imgbuffers(IT, img_spec, 1, Array)
         @compile_workload begin
