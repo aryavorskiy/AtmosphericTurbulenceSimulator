@@ -51,10 +51,10 @@ function Interpolator(array::AbstractArray, scale::Real)
 end
 function interpolate_add!(to::AbstractArray, from::AbstractArray, interp::Interpolator, f)
     @views @. to += f * (
-        (1 - interp.tx) * (1 - interp.ty') * from[interp.ix, interp.iy] +
-        interp.tx * (1 - interp.ty') * from[interp.ixp1, interp.iy] +
-        (1 - interp.tx) * interp.ty' * from[interp.ix, interp.iyp1] +
-        interp.tx * interp.ty' * from[interp.ixp1, interp.iyp1])
+        (1 - interp.tx) * (1 - interp.ty') * from[interp.ix, interp.iy, :] +
+        interp.tx * (1 - interp.ty') * from[interp.ixp1, interp.iy, :] +
+        (1 - interp.tx) * interp.ty' * from[interp.ix, interp.iyp1, :] +
+        interp.tx * interp.ty' * from[interp.ixp1, interp.iyp1, :])
     return to
 end
 

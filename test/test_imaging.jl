@@ -50,7 +50,7 @@
         @test_throws ArgumentError simulate_images(Int32, img_spec_cont, atm, ts_cont; n=16)
 
         tmpfile = tempname() * ".h5"
-        simulate_images(img_spec_cont, atm, ts_cont; n=16, filename=tmpfile, verbose=false)
+        simulate_images(img_spec_cont, atm, ts_cont; n=16, filename=tmpfile, verbose=false, deviceadapter=identity)
         h5open(tmpfile, "r") do fid
             images_cont = read(fid["images"])
             @test eltype(images_cont) == Float64
@@ -62,7 +62,7 @@
         img_spec_poisson = ImagingSpec(ap; nphotons=1e6, background=100)
         ts_poisson = PointSource()
         tmpfile = tempname() * ".h5"
-        simulate_images(img_spec_poisson, atm, ts_poisson; n=16, filename=tmpfile, verbose=false)
+        simulate_images(img_spec_poisson, atm, ts_poisson; n=16, filename=tmpfile, verbose=false, deviceadapter=identity)
         h5open(tmpfile, "r") do fid
             images_poisson = read(fid["images"])
             @test eltype(images_poisson) == Int64
