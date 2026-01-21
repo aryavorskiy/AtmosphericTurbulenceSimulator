@@ -25,6 +25,7 @@ FilterSpec(base_wavelength::T1, wavelengths::AbstractVector{T2},
     intensities::AbstractVector{T3}=ones(Int, length(wavelengths))) where {T1,T2,T3} =
     FilterSpec{promote_type(T1, T2, T3)}(base_wavelength, wavelengths, intensities)
 MonoFilterSpec(::Type{T}=Int) where T = FilterSpec{T}(1, [1], [1])
+nwavel(fs::FilterSpec) = length(fs.wavelengths)
 
 """
     FilterSpec(base_wavelength; bandwidth[, tcenter=1, tedge=1, npts=7])
@@ -43,42 +44,46 @@ function FilterSpec(base_wavelength::Real; bandwidth, tcenter=1, tedge=1, npts=7
     return FilterSpec(base_wavelength, wavelengths, intensities)
 end
 Base.convert(::Type{FilterSpec{T}}, bspec::FilterSpec) where T<:Real =
-    FilterSpec{T}(bspec.base_wavelength,
-        bspec.wavelengths, bspec.intensities)
+    FilterSpec{T}(bspec.base_wavelength, bspec.wavelengths, bspec.intensities)
 
-function prepare_spmat(::Type{T}, img_size, bspec::FilterSpec) where T<:Real
-    ctr1, ctr2 = img_size .÷ 2 .+ 1
-    is = Int[]
-    js = Int[]
-    vs = complex(T)[]
-    linds = LinearIndices(img_size)
-    nx, ny = img_size
-    for k in eachindex(bspec.wavelengths)
-        r = bspec.wavelengths[k] / bspec.base_wavelength
-        inten = bspec.intensities[k] / r^2
-        for j in 1:ny
-            dy = j - ctr2
-            sy = ctr2 + dy * r
-            iy = floor(Int, sy)
-            (1 <= iy < ny) || continue
-            for i in 1:nx
-                dx = i - ctr1
-                sx = ctr1 + dx * r
-                ix = floor(Int, sx)
-                if 1 <= ix < nx
-                    tx = sx - ix
-                    ty = sy - iy
-                    push!(is, linds[i, j], linds[i, j], linds[i, j], linds[i, j])
-                    push!(js, linds[ix, iy], linds[ix + 1, iy], linds[ix, iy + 1], linds[ix + 1, iy + 1])
-                    push!(vs,   (1 - tx) * (1 - ty) * inten,
-                                tx       * (1 - ty) * inten,
-                                (1 - tx) * ty       * inten,
-                                tx       * ty       * inten)
-                end
-            end
-        end
+"""Scale and accumulate PSF using vectorized bilinear interpolation - GPU compatible.
+
+This version uses broadcast-style vectorization to be compatible with GPU arrays.
+For each wavelength, indices and interpolation coefficients are collected into arrays,
+then applied via broadcasting to avoid scalar indexing.
+
+# Arguments
+- `output::AbstractArray`: output array of shape (nx, ny, batch) to accumulate scaled PSFs
+- `psf_buffer::AbstractArray`: PSF buffer of shape (nx, ny, n_wavelengths, batch) containing abs2(complex PSF)
+- `filter_spec::FilterSpec`: spectral filter specification with wavelengths and intensities
+"""
+function scale_and_add_psf!(output::AbstractArray, psf_buffer::AbstractArray, filter_spec::FilterSpec)
+    nx, ny = size(psf_buffer)
+    ctr1, ctr2 = (nx ÷ 2 + 1, ny ÷ 2 + 1)
+
+    fill!(output, 0)
+    for w in 1:nwavel(filter_spec)
+        scale_inv = filter_spec.wavelengths[w] / filter_spec.base_wavelength
+        inten_scale = filter_spec.intensities[w] * scale_inv^2
+
+        sx_grid = range((1 - ctr1) * scale_inv + ctr1, step=scale_inv, length=nx)
+        sy_grid = range((1 - ctr2) * scale_inv + ctr2, step=scale_inv, length=ny)
+        ix_grid = clamp.(floor.(Int, sx_grid), 1, nx)
+        iy_grid = clamp.(floor.(Int, sy_grid), 1, ny)
+        ixp1_grid = clamp.(ceil.(Int, sx_grid), 1, nx)
+        iyp1_grid = clamp.(ceil.(Int, sy_grid), 1, ny)
+
+        tx_grid = sx_grid .- ix_grid
+        ty_grid = sy_grid .- iy_grid
+
+        @views @. output += inten_scale * (
+            (1 - tx_grid) * (1 - ty_grid') * psf_buffer[ix_grid, iy_grid, :, w] +
+            tx_grid * (1 - ty_grid') * psf_buffer[ixp1_grid, iy_grid, :, w] +
+            (1 - tx_grid) * ty_grid' * psf_buffer[ix_grid, iyp1_grid, :, w] +
+            tx_grid * ty_grid' * psf_buffer[ixp1_grid, iyp1_grid, :, w]
+        )
     end
-    return sparse(is, js, vs, nx * ny, nx * ny)
+    return output
 end
 
 """
@@ -199,63 +204,48 @@ ImagingSpec(aperture::AbstractMatrix; nphotons, background=1, kw...) =
 ImagingSpec(::Type{T}, aperture::AbstractMatrix, args...; kw...) where T<:Real =
     ImagingSpec(convert.(T, aperture), args...; kw...)
 
-Adapt.adapt_structure(to, imgspec::ImagingSpec) =
-    ImagingSpec(Adapt.adapt_storage(to, imgspec.aperture), imgspec.photon_count, imgspec.filter_spec, imgspec.img_size)
+Adapt.adapt_structure(to, img_spec::ImagingSpec) =
+    ImagingSpec(Adapt.adapt_storage(to, img_spec.aperture), img_spec.photon_count, img_spec.filter_spec, img_spec.img_size)
 plate_size(img_spec::ImagingSpec) = size(img_spec.aperture)
 image_size(img_spec::ImagingSpec) = img_spec.img_size
 psf_norm(img_spec::ImagingSpec) = sum(abs2, img_spec.aperture) * prod(img_spec.img_size) *
         sum(img_spec.filter_spec.intensities)
 
-struct OpticalBuffers{AT, BT, MT, PT, PCT<:PhotonCount}
-    aperture::AT
-    radial_blur::BT
+struct OpticalBuffers{MT, MT2, MT3, PT}
     aperture_buffer::MT
     focal_buffer::MT
+    psf_buffer::MT2
+    read_buffer::MT3
     fftplan::PT
-    photon_count::PCT
 end
-plate_size(bufs::OpticalBuffers) = size(bufs.aperture)
 image_size(bufs::OpticalBuffers) = size(bufs.aperture_buffer)[1:2]
+image_type(bufs::OpticalBuffers) = eltype(bufs.read_buffer)
 batch_length(bufs::OpticalBuffers) = size(bufs.aperture_buffer, 3)
 
-function OpticalBuffers(imgspec::ImagingSpec, blur, batch::Int)
-    complex_type = complex(eltype(imgspec.aperture))
-    buf1 = similar(imgspec.aperture, complex_type, imgspec.img_size..., batch)
-    buf2 = similar(imgspec.aperture, complex_type, imgspec.img_size..., batch)
-    return OpticalBuffers(imgspec.aperture, blur, buf1, buf2, plan_fft(buf1, (1, 2)), imgspec.photon_count)
-end
-function prepare_blur(imgspec::ImagingSpec)
-    if length(imgspec.filter_spec.wavelengths) > 1
-        return prepare_spmat(eltype(imgspec.aperture), imgspec.img_size, imgspec.filter_spec)
-    else
-        return nothing
-    end
-end
-function OpticalBuffers(imgspec::ImagingSpec, batch::Int)
-    blur = prepare_blur(imgspec)
-    return OpticalBuffers(imgspec, blur, batch)
+function OpticalBuffers(::Type{T}, img_spec::ImagingSpec{NT}, batch::Int) where {T, NT}
+    buf1 = similar(img_spec.aperture, complex(NT), img_spec.img_size..., batch, nwavel(img_spec.filter_spec))
+    buf2 = similar(buf1)
+    psf_buf = similar(buf1, NT, img_spec.img_size..., batch)
+    read_buf = similar(buf1, T, img_spec.img_size..., batch)
+    return OpticalBuffers(buf1, buf2, psf_buf, read_buf, plan_fft(buf1, (1, 2)))
 end
 
-function write_phases!(aperture_buffer, phases, aperture)
+function write_phases!(aperture_buffer, phases, aperture, filter_spec)
     M, N = size(phases)
     Cx, Cy = size(aperture_buffer) .÷ 2
     fill!(aperture_buffer, 0)
-    aperture_buffer[Cx - M ÷ 2 + 1:Cx - M ÷ 2 + M, Cy - N ÷ 2 + 1:Cy - N ÷ 2 + N, :] .=
-        aperture .* cis.(phases)
+    wavelength_scales = reshape(filter_spec.base_wavelength ./ filter_spec.wavelengths,
+        (1, 1, 1, :))
+    @. aperture_buffer[Cx - M ÷ 2 + 1:Cx - M ÷ 2 + M, Cy - N ÷ 2 + 1:Cy - N ÷ 2 + N, :, :] =
+        aperture * cis(wavelength_scales * phases)
 end
 
-function radial_blur!(out, src, smat::AbstractMatrix)
-    mul!(reshape(out, :, size(src, 3)), smat, reshape(src, :, size(src, 3)))
-    return out
-end
-radial_blur!(out, src, ::Nothing) = copyto!(out, src)
-
-function psf!(bufs::OpticalBuffers, phases)
-    write_phases!(bufs.focal_buffer, phases, bufs.aperture)
+function psf!(bufs::OpticalBuffers, img_spec::ImagingSpec, phases)
+    write_phases!(bufs.focal_buffer, phases, img_spec.aperture, img_spec.filter_spec)
     mul!(bufs.aperture_buffer, bufs.fftplan, bufs.focal_buffer)
     fftshift!(bufs.focal_buffer, bufs.aperture_buffer, (1, 2))
     bufs.aperture_buffer .= abs2.(bufs.focal_buffer)
-    radial_blur!(bufs.focal_buffer, bufs.aperture_buffer, bufs.radial_blur)
+    scale_and_add_psf!(bufs.psf_buffer, bufs.aperture_buffer, img_spec.filter_spec)
 end
 
 function readout!(dst::AbstractArray, img::AbstractArray, pc::PhotonCount, psf_norm)
@@ -267,26 +257,26 @@ function readout!(dst::AbstractArray, img::AbstractArray, pc::PhotonCount, psf_n
         @. dst = img / psf_norm
     end
 end
-function apply_truesky!(dst, opt_buf::OpticalBuffers, ts::TrueSkyImage, psf_norm)
+readout!(opt_buf::OpticalBuffers, pc::PhotonCount, psf_norm) =
+    readout!(opt_buf.read_buffer, opt_buf.psf_buffer, pc, psf_norm)
+function apply_truesky!(opt_buf::OpticalBuffers, ts::TrueSkyImage)
+    #TODO Review for possible optimizations
+    copyto!(opt_buf.focal_buffer, opt_buf.psf_buffer)
     mul!(opt_buf.aperture_buffer, opt_buf.fftplan, opt_buf.focal_buffer)
     opt_buf.aperture_buffer .*= ts.true_sky_fft
     ldiv!(opt_buf.focal_buffer, opt_buf.fftplan, opt_buf.aperture_buffer)
-    readout!(dst, opt_buf.focal_buffer, opt_buf.photon_count, psf_norm)
+    opt_buf.psf_buffer .= real.(@view opt_buf.focal_buffer[:, :, :, 1])
 end
-function apply_truesky!(dst, opt_buf::OpticalBuffers, ds::DoubleSystem, psf_norm)
-    img = opt_buf.focal_buffer
-    @assert all(abs.(ds.rel_position) .< size(img)[1:2] .÷ 2)
-    @assert size(dst)[1:2] == image_size(opt_buf)
-    @assert size(dst, 3) == batch_length(opt_buf)
+function apply_truesky!(opt_buf::OpticalBuffers, ds::DoubleSystem)
+    img = opt_buf.psf_buffer
+    @assert all(abs.(ds.rel_position) .< image_size(opt_buf) .÷ 2)
     o1, o2 = ds.rel_position
     s1_dest, s1_src = o1 > 0 ? (o1 + 1:size(img, 1), 1:size(img, 1) - o1) : (1:size(img, 1) + o1, -o1 + 1:size(img, 1))
     s2_dest, s2_src = o2 > 0 ? (o2 + 1:size(img, 2), 1:size(img, 2) - o2) : (1:size(img, 2) + o2, -o2 + 1:size(img, 2))
     @views @. img[s1_dest, s2_dest, :] += img[s1_src, s2_src, :] * ds.intensity
-    readout!(dst, img, opt_buf.photon_count, psf_norm * (1 + ds.intensity))
+    img ./= (1 + ds.intensity)
 end
-function apply_truesky!(dst, opt_buf::OpticalBuffers, ::PointSource, psf_norm)
-    readout!(dst, opt_buf.focal_buffer, opt_buf.photon_count, psf_norm)
-end
+apply_truesky!(::OpticalBuffers, ::PointSource) = nothing
 
 
 """
@@ -320,52 +310,52 @@ end
 CircularAperture(sz::NTuple{2}, radius=minimum((sz .- 1) .÷ 2); kw...) =
     CircularAperture(Float64, sz, radius; kw...)
 
-struct ImgBufSerial{BT<:OpticalBuffers, FT<:Real, AT<:AbstractArray}
+struct ImgBufSerial{BT<:OpticalBuffers, ST<:ImagingSpec, FT<:Real}
     opt_buf::BT
+    spec::ST
     psf_norm::FT
-    img_tensor::AT
 end
 image_size(img_buf::ImgBufSerial) = image_size(img_buf.opt_buf)
-image_type(img_buf::ImgBufSerial) = eltype(img_buf.img_tensor)
+image_type(img_buf::ImgBufSerial) = image_type(img_buf.opt_buf)
 function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, batch::Int, deviceadapter) where T
     img_spec_adapt = adapt(deviceadapter, img_spec)
-    rblur_adapt = adapt(deviceadapter, prepare_blur(img_spec_adapt))
-    ImgBufSerial(
-        OpticalBuffers(img_spec_adapt, rblur_adapt, batch),
-        psf_norm(img_spec),
-        adapt(deviceadapter, zeros(T, img_spec.img_size..., batch)))
+    ImgBufSerial(OpticalBuffers(T, img_spec_adapt, batch), img_spec_adapt, psf_norm(img_spec))
 end
-@inline function compute_images!(img_array, img_buf::ImgBufSerial, phases, true_sky)
-    psf!(img_buf.opt_buf, phases)
-    apply_truesky!(img_buf.img_tensor, img_buf.opt_buf, true_sky, img_buf.psf_norm)
-    copyto!(img_array, img_buf.img_tensor)
+@inline function compute_images!(img_buf::ImgBufSerial, phases, true_sky)
+    psf!(img_buf.opt_buf, img_buf.spec, phases)
+    apply_truesky!(img_buf.opt_buf, true_sky)
+    readout!(img_buf.opt_buf, img_buf.spec.photon_count, img_buf.psf_norm)
+    return img_buf.opt_buf.read_buffer
 end
 
-struct ImgBufParallel{T<:Real,BT<:OpticalBuffers,FT<:Real}
+struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,AT}
     opt_bufs::Vector{BT}
+    spec::ST
     psf_norm::FT
+    img_array::AT
 end
-ImgBufParallel(bufs::Vector{BT}, psf_norm::FT, ::Type{T}) where {T,BT<:OpticalBuffers,FT} =
-    ImgBufParallel{T,BT,FT}(bufs, psf_norm)
 image_size(img_buf::ImgBufParallel) = image_size(img_buf.opt_bufs[1])
-image_type(::ImgBufParallel{T}) where T = T
-function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, ::Int, ::Type{<:Array}) where T
-    imgbuf1 = OpticalBuffers(img_spec, 1)
+image_type(img_buf::ImgBufParallel) = eltype(img_buf.img_array)
+function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, batch::Int, ::Type{<:Array}) where T
+    imgbuf1 = OpticalBuffers(T, img_spec, 1)
+    img_array = similar(imgbuf1.read_buffer, image_size(img_spec)..., batch)
     opt_buf_vector = Array{typeof(imgbuf1)}(undef, Threads.nthreads())
     opt_buf_vector[1] = imgbuf1
     Threads.@threads for i in 2:Threads.nthreads()
-        opt_buf_vector[i] = OpticalBuffers(img_spec, 1)
+        opt_buf_vector[i] = OpticalBuffers(T, img_spec, 1)
     end
-    return ImgBufParallel(opt_buf_vector, psf_norm(img_spec), T)
+    return ImgBufParallel(opt_buf_vector, img_spec, psf_norm(img_spec), img_array)
 end
-@inline function compute_images!(img_array, img_buf::ImgBufParallel, phases, true_sky)
+@inline function compute_images!(img_buf::ImgBufParallel, phases, true_sky)
     Threads.@threads for i in eachindex(img_buf.opt_bufs)
         op_buf = img_buf.opt_bufs[i]
         for j in i:length(img_buf.opt_bufs):size(phases, 3)
-            psf!(op_buf, view(phases, :, :, j))
-            apply_truesky!(view(img_array, :, :, j), op_buf, true_sky, img_buf.psf_norm)
+            psf!(op_buf, img_buf.spec, view(phases, :, :, j))
+            apply_truesky!(op_buf, true_sky)
+            readout!(view(img_buf.img_array, :, :, j), op_buf.psf_buffer, img_buf.spec.photon_count, img_buf.psf_norm)
         end
     end
+    return img_buf.img_array
 end
 
 function simulation_run!!(img_dataset, phs_dataset, phsbuffers, imgbuffers, truesky_adapt; n, verbose=true)
@@ -380,9 +370,14 @@ function simulation_run!!(img_dataset, phs_dataset, phsbuffers, imgbuffers, true
     for j in 1:cld(n, batch)
         phases = samplephases!(phsbuffers)
         if imgbuffers !== nothing
-            compute_images!(image_buf_h5, imgbuffers, phases, truesky_adapt)
+            images = compute_images!(imgbuffers, phases, truesky_adapt)
             if img_dataset !== nothing
-                HDF5.write_chunk(img_dataset, j - 1, image_buf_h5)
+                if images isa Array
+                    HDF5.write_chunk(img_dataset, j - 1, images)
+                else
+                    copy!(image_buf_h5, images)
+                    HDF5.write_chunk(img_dataset, j - 1, image_buf_h5)
+                end
             end
         end
         if phs_dataset !== nothing
@@ -422,9 +417,8 @@ the results to an HDF5 file.
 - `deviceadapter`: adapter for device-backed arrays (defaults to `Array`). To use GPU arrays,
   pass e.g. `CUDA.CuArray` here (requires CUDA.jl).
 """
-function simulate_images(::Type{T}, img_spec::ImagingSpec{FT}, atm_spec::AtmosphereSpec,
-    truesky::TrueSky=PointSource(); n::Int, batch::Int=DEFAULT_BATCH, filename="simulation.h5", verbose=true,
-    savephases::Bool=true, deviceadapter=Array) where {T,FT}
+function simulate_images(::Type{T}, img_spec::ImagingSpec, atm_spec::AtmosphereSpec, truesky::TrueSky=PointSource();
+    n::Int, batch::Int=DEFAULT_BATCH, filename="simulation.h5", verbose=true, savephases::Bool=true, deviceadapter=Array) where {T}
     if !isfinite_photons(img_spec.photon_count) && T <: Integer
         throw(ArgumentError("Integer image eltype not compatible with infinite-photon imaging spec."))
     end
