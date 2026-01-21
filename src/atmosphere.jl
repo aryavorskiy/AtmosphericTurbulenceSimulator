@@ -48,12 +48,11 @@ function KarhunenLoeveBuffers(sz::NTuple{2,Int}, (E, U)::EigenType, batch::Int)
 end
 plate_size(sampler::KarhunenLoeveBuffers) = sampler.shape
 batch_length(sampler::KarhunenLoeveBuffers) = size(sampler.noise_buffer, 2)
-out_buffer(sampler::KarhunenLoeveBuffers) = reshape(sampler.out_buffer, (sampler.shape..., size(sampler.out_buffer, 2)))
-phase_type(sampler) = eltype(out_buffer(sampler))
+phase_type(sampler::KarhunenLoeveBuffers) = eltype(sampler.out_buffer)
 function samplephases!(sampler::KarhunenLoeveBuffers)
     randn!(sampler.noise_buffer)
     mul!(sampler.out_buffer, sampler.noise_transform, sampler.noise_buffer)
-    return out_buffer(sampler)
+    return reshape(sampler.out_buffer, (sampler.shape..., size(sampler.out_buffer, 2)))
 end
 
 struct HardingSpec{N}
@@ -119,24 +118,23 @@ SingleLayer(sz::NTuple{2,Int}, r0::Real; kw...) =
 SingleLayer(::Type{T}, sz::NTuple{2,Int}, r0; kw...) where T =
     SingleLayer(HardingSpec(sz; kw...), convert(T, r0))
 plate_size(spec::SingleLayer) = spec.harding.interpolate_to
-function prepare_phasebuffers(spec::SingleLayer{T,N}, batch::Int, deviceadapter) where {T,N}
+function prepare_phasebuffers(spec::SingleLayer{T,N} where T, batch::Int, deviceadapter) where {N}
     low_size = spec.harding.interpolate_from
-    covar = Adapt.adapt_storage(deviceadapter, kolmogorov_covmat(float(T), low_size))
     low_r₀ = spec.r₀ / 2^N
+    covar = Adapt.adapt_storage(deviceadapter, kolmogorov_covmat(typeof(low_r₀), low_size))
     covar .*= low_r₀^(-5/3)
     E, U = eigen(Symmetric(covar))
     kl = KarhunenLoeveBuffers(low_size, (E, U), batch)
-    N == 0 && return kl
-    return HardingInterpolator(kl, low_r₀, spec.harding)
+    return HardingInterpolator(kl, kl.out_buffer, low_r₀, spec.harding)
 end
 
-struct HardingInterpolator{N,BT,AT}
+struct HardingInterpolator{BT,NAT<:Tuple}
     base::BT
-    out_buffers::NTuple{N,AT}
+    out_buffers::NAT
     noise_std::Float64
     crop_size::NTuple{2,Int}
 end
-function HardingInterpolator(base, r0::Number, hspec::HardingSpec{N}) where N
+function HardingInterpolator(base, out_buffer, r0::Number, hspec::HardingSpec{N}) where N
     low_size = hspec.interpolate_from
     any(low_size .≤ 11) && throw(ArgumentError("Dimensions must be greater than 11"))
     buffers = ntuple(Val(N)) do i
@@ -144,16 +142,18 @@ function HardingInterpolator(base, r0::Number, hspec::HardingSpec{N}) where N
         for _ in 1:i
             lsz = 2 .* lsz .- 11
         end
-        similar(out_buffer(base), (lsz .+ 10)..., batch_length(base))
+        similar(out_buffer, (lsz .+ 10)..., batch_length(base))
     end
     return HardingInterpolator(base, buffers, sqrt(0.5265 / r0^(5/3)), hspec.interpolate_to)
 end
 plate_size(sampler::HardingInterpolator) = sampler.crop_size
-batch_length(sampler::HardingInterpolator) = size(sampler.out_buffers[end], 3)
-out_buffer(sampler::HardingInterpolator) = sampler.out_buffers[end]
+batch_length(sampler::HardingInterpolator) = batch_length(sampler.base)
+phase_type(sampler::HardingInterpolator) = phase_type(sampler.base)
 
-function samplephases!(harding::HardingInterpolator{N}) where N
+function samplephases!(harding::HardingInterpolator)
     low = samplephases!(harding.base)
+    N = length(harding.out_buffers)
+    N == 0 && return low
     harding_upsample!(harding.out_buffers[1], low, harding.noise_std)
     for i in 2:N
         prev_buf = harding.out_buffers[i - 1]
@@ -232,7 +232,7 @@ the results to an HDF5 file.
 
 # Keyword Arguments
 - `n`: number of phase screens to simulate.
-- `batch`: batch size for buffered computations and HDF5 writes (default 512).
+- `batch`: batch size for buffered computations and HDF5 writes (default 128).
 - `filename`: output HDF5 filename (default "simulation.h5").
 - `verbose`: show progress meter (true by default).
 - `deviceadapter`: adapter for device-backed arrays (defaults to `Array`). To use GPU arrays,

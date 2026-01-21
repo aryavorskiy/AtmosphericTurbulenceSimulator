@@ -1,4 +1,4 @@
-using LinearAlgebra, FFTW, Distributions, HDF5, ProgressMeter, SparseArrays, Adapt
+using LinearAlgebra, FFTW, Distributions, HDF5, ProgressMeter, Adapt
 
 const DEFAULT_BATCH = 128
 
@@ -414,7 +414,7 @@ the results to an HDF5 file.
 
 # Keyword Arguments
 - `n`: number of images to simulate.
-- `batch`: batch size for buffered computations and HDF5 writes (default 512).
+- `batch`: batch size for buffered computations and HDF5 writes (default 128).
 - `filename`: output HDF5 filename (default "simulation.h5").
 - `verbose`: show progress meter (true by default).
 - `savephases`: when true, the sampled phase screens are saved in the HDF5 in dataset with
