@@ -27,6 +27,41 @@ FilterSpec(base_wavelength::T1, wavelengths::AbstractVector{T2},
 MonoFilterSpec(::Type{T}=Int) where T = FilterSpec{T}(1, [1], [1])
 nwavel(fs::FilterSpec) = length(fs.wavelengths)
 
+struct Interpolator{VT}
+    ix::Vector{Int}
+    iy::Vector{Int}
+    ixp1::Vector{Int}
+    iyp1::Vector{Int}
+    tx::VT
+    ty::VT
+end
+function Interpolator(array::AbstractArray, scale::Real)
+    nx, ny = size(array)
+    sx = range((1 - nx ÷ 2) / scale + nx ÷ 2 + 1, step=1/scale, length=nx)
+    sy = range((1 - ny ÷ 2) / scale + ny ÷ 2 + 1, step=1/scale, length=ny)
+    ix = clamp.(floor.(Int, sx), 1, nx)
+    iy = clamp.(floor.(Int, sy), 1, ny)
+    ixp1 = clamp.(ceil.(Int, sx), 1, nx)
+    iyp1 = clamp.(ceil.(Int, sy), 1, ny)
+    tx = similar(array, nx)
+    copy!(tx, (sx .- ix))
+    ty = similar(array, ny)
+    copy!(ty, (sy .- iy))
+    return Interpolator(ix, iy, ixp1, iyp1, tx, ty)
+end
+Adapt.adapt_structure(to, interp::Interpolator) =
+    Interpolator(interp.ix, interp.iy, interp.ixp1, interp.iyp1,
+        Adapt.adapt_storage(to, interp.tx), Adapt.adapt_storage(to, interp.ty))
+function interpolate_add!(to::AbstractArray, from::AbstractArray, interp::Interpolator, f)
+    @views @. to += f * (
+        (1 - interp.tx) * (1 - interp.ty') * from[interp.ix, interp.iy] +
+        interp.tx * (1 - interp.ty') * from[interp.ixp1, interp.iy] +
+        (1 - interp.tx) * interp.ty' * from[interp.ix, interp.iyp1] +
+        interp.tx * interp.ty' * from[interp.ixp1, interp.iyp1])
+    return to
+end
+
+
 """
     FilterSpec(base_wavelength; bandwidth[, tcenter=1, tedge=1, npts=7])
 
@@ -211,12 +246,13 @@ image_size(img_spec::ImagingSpec) = img_spec.img_size
 psf_norm(img_spec::ImagingSpec) = sum(abs2, img_spec.aperture) * prod(img_spec.img_size) *
         sum(img_spec.filter_spec.intensities)
 
-struct OpticalBuffers{MT, MT2, MT3, PT}
+struct OpticalBuffers{MT, MT2, MT3, PT, IT}
     aperture_buffer::MT
     focal_buffer::MT
     psf_buffer::MT2
     read_buffer::MT3
     fftplan::PT
+    interpolators::Vector{IT}
 end
 image_size(bufs::OpticalBuffers) = size(bufs.aperture_buffer)[1:2]
 image_type(bufs::OpticalBuffers) = eltype(bufs.read_buffer)
@@ -227,7 +263,9 @@ function OpticalBuffers(::Type{T}, img_spec::ImagingSpec{NT}, batch::Int) where 
     buf2 = similar(buf1)
     psf_buf = similar(buf1, NT, img_spec.img_size..., batch)
     read_buf = similar(buf1, T, img_spec.img_size..., batch)
-    return OpticalBuffers(buf1, buf2, psf_buf, read_buf, plan_fft(buf1, (1, 2)))
+    interpolators = [Interpolator(psf_buf, img_spec.filter_spec.wavelengths[w] /
+        img_spec.filter_spec.base_wavelength) for w in 1:nwavel(img_spec.filter_spec)]
+    return OpticalBuffers(buf1, buf2, psf_buf, read_buf, plan_fft(buf1, (1, 2)), interpolators)
 end
 
 function write_phases!(aperture_buffer, phases, aperture, filter_spec)
@@ -245,7 +283,13 @@ function psf!(bufs::OpticalBuffers, img_spec::ImagingSpec, phases)
     mul!(bufs.aperture_buffer, bufs.fftplan, bufs.focal_buffer)
     fftshift!(bufs.focal_buffer, bufs.aperture_buffer, (1, 2))
     bufs.aperture_buffer .= abs2.(bufs.focal_buffer)
-    scale_and_add_psf!(bufs.psf_buffer, bufs.aperture_buffer, img_spec.filter_spec)
+    fill!(bufs.psf_buffer, 0)
+    for w in 1:nwavel(img_spec.filter_spec)
+        mono_psf_block = view(bufs.aperture_buffer, :, :, :, w)
+        factor = img_spec.filter_spec.intensities[w] /
+            (img_spec.filter_spec.wavelengths[w] / img_spec.filter_spec.base_wavelength)^2
+        interpolate_add!(bufs.psf_buffer, mono_psf_block, bufs.interpolators[w], factor)
+    end
 end
 
 function readout!(dst::AbstractArray, img::AbstractArray, pc::PhotonCount, psf_norm)
