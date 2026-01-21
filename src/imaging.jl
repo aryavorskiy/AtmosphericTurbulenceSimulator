@@ -1,6 +1,6 @@
 using LinearAlgebra, FFTW, Distributions, HDF5, ProgressMeter, SparseArrays, Adapt
 
-const DEFAULT_BATCH = 64
+const DEFAULT_BATCH = 128
 
 """
     FilterSpec
@@ -49,9 +49,6 @@ function Interpolator(array::AbstractArray, scale::Real)
     copy!(ty, (sy .- iy))
     return Interpolator(ix, iy, ixp1, iyp1, tx, ty)
 end
-Adapt.adapt_structure(to, interp::Interpolator) =
-    Interpolator(interp.ix, interp.iy, interp.ixp1, interp.iyp1,
-        Adapt.adapt_storage(to, interp.tx), Adapt.adapt_storage(to, interp.ty))
 function interpolate_add!(to::AbstractArray, from::AbstractArray, interp::Interpolator, f)
     @views @. to += f * (
         (1 - interp.tx) * (1 - interp.ty') * from[interp.ix, interp.iy] +
@@ -81,46 +78,6 @@ end
 Base.convert(::Type{FilterSpec{T}}, bspec::FilterSpec) where T<:Real =
     FilterSpec{T}(bspec.base_wavelength, bspec.wavelengths, bspec.intensities)
 
-"""Scale and accumulate PSF using vectorized bilinear interpolation - GPU compatible.
-
-This version uses broadcast-style vectorization to be compatible with GPU arrays.
-For each wavelength, indices and interpolation coefficients are collected into arrays,
-then applied via broadcasting to avoid scalar indexing.
-
-# Arguments
-- `output::AbstractArray`: output array of shape (nx, ny, batch) to accumulate scaled PSFs
-- `psf_buffer::AbstractArray`: PSF buffer of shape (nx, ny, n_wavelengths, batch) containing abs2(complex PSF)
-- `filter_spec::FilterSpec`: spectral filter specification with wavelengths and intensities
-"""
-function scale_and_add_psf!(output::AbstractArray, psf_buffer::AbstractArray, filter_spec::FilterSpec)
-    nx, ny = size(psf_buffer)
-    ctr1, ctr2 = (nx ÷ 2 + 1, ny ÷ 2 + 1)
-
-    fill!(output, 0)
-    for w in 1:nwavel(filter_spec)
-        scale_inv = filter_spec.wavelengths[w] / filter_spec.base_wavelength
-        inten_scale = filter_spec.intensities[w] * scale_inv^2
-
-        sx_grid = range((1 - ctr1) * scale_inv + ctr1, step=scale_inv, length=nx)
-        sy_grid = range((1 - ctr2) * scale_inv + ctr2, step=scale_inv, length=ny)
-        ix_grid = clamp.(floor.(Int, sx_grid), 1, nx)
-        iy_grid = clamp.(floor.(Int, sy_grid), 1, ny)
-        ixp1_grid = clamp.(ceil.(Int, sx_grid), 1, nx)
-        iyp1_grid = clamp.(ceil.(Int, sy_grid), 1, ny)
-
-        tx_grid = sx_grid .- ix_grid
-        ty_grid = sy_grid .- iy_grid
-
-        @views @. output += inten_scale * (
-            (1 - tx_grid) * (1 - ty_grid') * psf_buffer[ix_grid, iy_grid, :, w] +
-            tx_grid * (1 - ty_grid') * psf_buffer[ixp1_grid, iy_grid, :, w] +
-            (1 - tx_grid) * ty_grid' * psf_buffer[ix_grid, iyp1_grid, :, w] +
-            tx_grid * ty_grid' * psf_buffer[ixp1_grid, iyp1_grid, :, w]
-        )
-    end
-    return output
-end
-
 """
     PhotonCount(nphotons[, background])
 
@@ -133,11 +90,8 @@ struct PhotonCount{T<:Real}
 end
 PhotonCount(nphotons::T1, background::T2) where {T1<:Real,T2<:Real} =
     return PhotonCount{promote_type(T1, T2)}(nphotons, background)
-PhotonCount(nphotons::Real) = if isinf(nphotons)
-    PhotonCount(Inf, zero(Float64))
-else
+PhotonCount(nphotons::Real) = isinf(nphotons) ? PhotonCount(Inf, zero(Float64)) :
     throw(ArgumentError("Must specify background when `nphotons` is finite"))
-end
 Base.convert(::Type{PhotonCount{T}}, pc::PhotonCount) where T<:Real =
     PhotonCount{T}(pc.nphotons, pc.background)
 isfinite_photons(pc::PhotonCount) = isfinite(pc.nphotons)
@@ -234,8 +188,14 @@ function ImagingSpec(aperture::AbstractMatrix{T}, photon_count::PhotonCount;
     pc = convert(PhotonCount{T}, photon_count)
     return ImagingSpec{T, typeof(aperture)}(aperture, pc, fs, img_size)
 end
-ImagingSpec(aperture::AbstractMatrix; nphotons, background=1, kw...) =
-    ImagingSpec(aperture, PhotonCount(nphotons, background); kw...)
+function ImagingSpec(aperture::AbstractMatrix; nphotons, background=nothing, kw...)
+    if background === nothing
+        pc = PhotonCount(nphotons)
+    else
+        pc = PhotonCount(nphotons, background)
+    end
+    ImagingSpec(aperture, pc; kw...)
+end
 ImagingSpec(::Type{T}, aperture::AbstractMatrix, args...; kw...) where T<:Real =
     ImagingSpec(convert.(T, aperture), args...; kw...)
 
@@ -272,10 +232,11 @@ function write_phases!(aperture_buffer, phases, aperture, filter_spec)
     M, N = size(phases)
     Cx, Cy = size(aperture_buffer) .÷ 2
     fill!(aperture_buffer, 0)
-    wavelength_scales = reshape(filter_spec.base_wavelength ./ filter_spec.wavelengths,
-        (1, 1, 1, :))
-    @. aperture_buffer[Cx - M ÷ 2 + 1:Cx - M ÷ 2 + M, Cy - N ÷ 2 + 1:Cy - N ÷ 2 + N, :, :] =
-        aperture * cis(wavelength_scales * phases)
+    for w in 1:nwavel(filter_spec)
+        scale = filter_spec.wavelengths[w] / filter_spec.base_wavelength
+        @. aperture_buffer[Cx - M ÷ 2 + 1:Cx - M ÷ 2 + M, Cy - N ÷ 2 + 1:Cy - N ÷ 2 + N, :, w] =
+            aperture * cis(scale * phases)
+    end
 end
 
 function psf!(bufs::OpticalBuffers, img_spec::ImagingSpec, phases)
@@ -445,8 +406,8 @@ Simulate `n` images using the provided imaging and atmosphere specifications and
 the results to an HDF5 file.
 
 # Arguments
-- `T`: output image numeric type; if not provided, defaults to `Int` for
-  finite-photon simulations (determined by `img_spec.photon_count.nphotons`) and `Float64` for infinite-photon models.
+- `T`: output image numeric type; if not provided, defaults to `Int` for finite-photon
+    simulations (determined by `img_spec.photon_count.nphotons`) and `Float64` for infinite-photon models.
 - `img_spec`: an `ImagingSpec` describing the aperture, image size, photon budget and filter.
 - `atm_spec`: an `AtmosphereSpec` used to produce phase screens.
 - `truesky`: a `TrueSky` model (e.g. `PointSource`, `DoubleSystem`, `TrueSkyImage`).

@@ -55,8 +55,12 @@
 
         # Test with filter
         filter = FilterSpec(500.0; bandwidth=100.0)
-        img_spec_filter = ImagingSpec(ap; nphotons=Inf, filter_spec=filter)
+        img_spec_filter = ImagingSpec(ap; nphotons=1e6, background=10, filter_spec=filter)
         @test img_spec_filter.filter_spec.base_wavelength == 500.0
+        @test img_spec_filter.photon_count.nphotons == 1e6
+        @test img_spec_filter.photon_count.background == 10
+
+        @test_throws ArgumentError ImagingSpec(ap; nphotons=1e6)
     end
 
     @testset "TrueSky models" begin
