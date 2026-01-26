@@ -27,11 +27,11 @@ FilterSpec(base_wavelength::T1, wavelengths::AbstractVector{T2},
 MonoFilterSpec(::Type{T}=Int) where T = FilterSpec{T}(1, [1], [1])
 nwavel(fs::FilterSpec) = length(fs.wavelengths)
 
-struct Interpolator{VT}
-    ix::Vector{Int}
-    iy::Vector{Int}
-    ixp1::Vector{Int}
-    iyp1::Vector{Int}
+struct Interpolator{IT,VT}
+    ix::IT
+    iy::IT
+    ixp1::IT
+    iyp1::IT
     tx::VT
     ty::VT
 end
@@ -39,22 +39,22 @@ function Interpolator(array::AbstractArray, scale::Real)
     nx, ny = size(array)
     sx = range((1 - nx ÷ 2) / scale + nx ÷ 2 + 1, step=1/scale, length=nx)
     sy = range((1 - ny ÷ 2) / scale + ny ÷ 2 + 1, step=1/scale, length=ny)
-    ix = clamp.(floor.(Int, sx), 1, nx)
-    iy = clamp.(floor.(Int, sy), 1, ny)
-    ixp1 = clamp.(ceil.(Int, sx), 1, nx)
-    iyp1 = clamp.(ceil.(Int, sy), 1, ny)
-    tx = similar(array, nx)
-    copy!(tx, (sx .- ix))
-    ty = similar(array, ny)
-    copy!(ty, (sy .- iy))
+    ix = copy!(similar(array, Int, nx), clamp.(floor.(Int, sx), 1, nx))
+    iy = copy!(similar(array, Int, ny), clamp.(floor.(Int, sy), 1, ny))
+    ixp1 = copy!(similar(array, Int, nx), clamp.(ceil.(Int, sx), 1, nx))
+    iyp1 = copy!(similar(array, Int, ny), clamp.(ceil.(Int, sy), 1, ny))
+    tx = copy!(similar(array, nx), (sx .- ix))
+    ty = copy!(similar(array, ny), (sy .- iy))
     return Interpolator(ix, iy, ixp1, iyp1, tx, ty)
 end
 function interpolate_add!(to::AbstractArray, from::AbstractArray, interp::Interpolator, f)
+    tx = interp.tx
+    ty = interp.ty'
     @views @. to += f * (
-        (1 - interp.tx) * (1 - interp.ty') * from[interp.ix, interp.iy, :] +
-        interp.tx * (1 - interp.ty') * from[interp.ixp1, interp.iy, :] +
-        (1 - interp.tx) * interp.ty' * from[interp.ix, interp.iyp1, :] +
-        interp.tx * interp.ty' * from[interp.ixp1, interp.iyp1, :])
+        (1 - tx) * (1 - ty) * from[interp.ix, interp.iy, :] +
+        tx * (1 - ty) * from[interp.ixp1, interp.iy, :] +
+        (1 - tx) * ty * from[interp.ix, interp.iyp1, :] +
+        tx * ty * from[interp.ixp1, interp.iyp1, :])
     return to
 end
 
@@ -247,15 +247,17 @@ function psf!(bufs::OpticalBuffers, img_spec::ImagingSpec, phases)
     fill!(bufs.psf_buffer, 0)
     for w in 1:nwavel(img_spec.filter_spec)
         mono_psf_block = view(bufs.aperture_buffer, :, :, :, w)
-        factor = img_spec.filter_spec.intensities[w] /
-            (img_spec.filter_spec.wavelengths[w] / img_spec.filter_spec.base_wavelength)^2
-        interpolate_add!(bufs.psf_buffer, mono_psf_block, bufs.interpolators[w], factor)
+        scale = img_spec.filter_spec.wavelengths[w] / img_spec.filter_spec.base_wavelength
+        factor = img_spec.filter_spec.intensities[w] / scale^2
+        if scale ≈ 1
+            bufs.psf_buffer .+= mono_psf_block .* factor
+        else
+            interpolate_add!(bufs.psf_buffer, mono_psf_block, bufs.interpolators[w], factor)
+        end
     end
 end
 
 function readout!(dst::AbstractArray, img::AbstractArray, pc::PhotonCount, psf_norm)
-    @assert maximum(abs ∘ imag, img) / maximum(abs ∘ real, img) < 1e-5
-    @assert all(x -> real(x) ≥ 0, img)
     if isfinite_photons(pc)
         @. dst = rand(Poisson(real(img) / psf_norm * pc.nphotons + pc.background))
     else
@@ -455,5 +457,5 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec, atm_spec::AtmosphereS
             n=n, verbose=verbose)
     end
 end
-simulate_images(img_spec::ImagingSpec, phase_sampler::AtmosphereSpec, true_sky::TrueSky=PointSource(); kwargs...) =
-    simulate_images(isfinite_photons(img_spec.photon_count) ? Int : Float64, img_spec, phase_sampler, true_sky; kwargs...)
+simulate_images(img_spec::ImagingSpec{T}, phase_sampler::AtmosphereSpec, true_sky::TrueSky=PointSource(); kwargs...) where {T} =
+    simulate_images(isfinite_photons(img_spec.photon_count) ? Int : T, img_spec, phase_sampler, true_sky; kwargs...)
