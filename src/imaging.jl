@@ -48,9 +48,13 @@ function Interpolator(array::AbstractArray, scale::Real)
     return Interpolator(ix, iy, ixp1, iyp1, tx, ty)
 end
 function interpolate_add!(to::AbstractArray, from::AbstractArray, interp::Interpolator, f)
+    size(from)[1:2] == length.((interp.ix, interp.iy)) == length.((interp.ixp1, interp.iyp1)) ||
+        throw(DimensionMismatch("incmpatible Interpolator dimensions"))
+    size(to) == size(from) ||
+        throw(DimensionMismatch("src and dest must have matching sizes"))
     tx = interp.tx
-    ty = interp.ty'
-    @views @. to += f * (
+    ty = reshape(interp.ty, (1, :))
+    @views @inbounds @. to += f * (
         (1 - tx) * (1 - ty) * from[interp.ix, interp.iy, :] +
         tx * (1 - ty) * from[interp.ixp1, interp.iy, :] +
         (1 - tx) * ty * from[interp.ix, interp.iyp1, :] +
