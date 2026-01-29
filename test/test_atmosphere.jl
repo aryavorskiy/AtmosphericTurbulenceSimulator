@@ -27,7 +27,8 @@
     @testset "Phase screen generation" begin
         atm = SingleLayer((32, 32), 5.0)
         tmpfile = tempname() * ".h5"
-        simulate_phases(atm; n=16, filename=tmpfile, verbose=false)
+        res = simulate_phases(atm; n=16, filename=tmpfile, verbose=false)
+        @test res === nothing  # When filename is given, should return nothing
         phases = h5read(tmpfile, "phases")
         @test size(phases) == (32, 32, 16)
         @test vec(mean(phases, dims=(1,2))) ≈ zeros(16) atol=1e-6
@@ -42,9 +43,7 @@
 
         # Use temporary file
         for atm in (atm1, atm2)
-            tmpfile = tempname() * ".h5"
-            simulate_phases(atm; n=1000, filename=tmpfile, verbose=false)
-            phases = h5read(tmpfile, "phases")
+            phases = simulate_phases(atm; n=1000, filename=nothing, verbose=false)
             @test eltype(phases) == Float32
 
             for D in [(3, 2), (3, 15), (5, 5), (5, 20), (16, 2), (16, 16)]
@@ -52,7 +51,6 @@
                 emp_structure = mean(abs2, diff)
                 @test emp_structure ≈ 6.88 * (hypot(D...) / 5)^(5/3) rtol=0.1
             end
-            rm(tmpfile, force=true)
         end
     end
 end

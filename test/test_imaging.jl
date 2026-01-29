@@ -13,7 +13,8 @@
 
         for (ts, is) in zip((ts1, ts2, ts3), (img_spec, img_spec2, img_spec3))
             tmpfile = tempname() * ".h5"
-            simulate_images(Int32, is, atm, ts; n=16, filename=tmpfile, verbose=false)
+            res = simulate_images(Int32, is, atm, ts; n=16, filename=tmpfile, verbose=false)
+            @test res === nothing  # When filename is given, should return nothing
 
             h5open(tmpfile, "r") do fid
                 @test haskey(fid, "images")
@@ -49,26 +50,17 @@
         ts_cont = PointSource()
         @test_throws ArgumentError simulate_images(Int32, img_spec_cont, atm, ts_cont; n=16)
 
-        tmpfile = tempname() * ".h5"
-        simulate_images(img_spec_cont, atm, ts_cont; n=16, filename=tmpfile, verbose=false, deviceadapter=identity)
-        h5open(tmpfile, "r") do fid
-            images_cont = read(fid["images"])
-            @test eltype(images_cont) == Float64
-            @test all(>=(-eps()), images_cont)
-        end
-        rm(tmpfile, force=true)
+        images_cont = simulate_images(img_spec_cont, atm, ts_cont; n=16, filename=nothing, verbose=false, deviceadapter=identity).images
+        @test eltype(images_cont) == Float64
+        @test all(>=(-eps()), images_cont)
 
         # Poisson sampling
         img_spec_poisson = ImagingSpec(ap; nphotons=1e6, background=100)
         ts_poisson = PointSource()
-        tmpfile = tempname() * ".h5"
-        simulate_images(img_spec_poisson, atm, ts_poisson; n=16, filename=tmpfile, verbose=false, deviceadapter=identity)
-        h5open(tmpfile, "r") do fid
-            images_poisson = read(fid["images"])
-            @test eltype(images_poisson) == Int64
-            @test all(>=(0), images_poisson)
-        end
-        rm(tmpfile, force=true)
+        images_poisson = simulate_images(img_spec_poisson, atm, ts_poisson; n=16, filename=nothing, verbose=false, deviceadapter=identity).images
+
+        @test eltype(images_poisson) == Int64
+        @test all(>=(0), images_poisson)
     end
 
     @testset "No phases" begin
