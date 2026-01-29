@@ -220,27 +220,3 @@ function harding_upsample!(out_buf, low, noise_std)
         c_f * (out_buf[inds_even_x .+ 3, inds_odd_y, :] + out_buf[inds_even_x .- 3, inds_odd_y, :] +
                 out_buf[inds_even_x, inds_odd_y .+ 3, :] + out_buf[inds_even_x, inds_odd_y .- 3, :])
 end
-
-"""
-    simulate_phases(atm_spec::AtmosphereSpec; n, [batch, filename, verbose, deviceadapter])
-
-Simulate `n` phase screens using the provided atmosphere specification and write
-the results to an HDF5 file.
-
-# Arguments
-- `atm_spec`: an `AtmosphereSpec` used to produce phase screens.
-
-# Keyword Arguments
-- `n`: number of phase screens to simulate.
-- `batch`: batch size for buffered computations and HDF5 writes (default 128).
-- `filename`: output HDF5 filename (default "simulation.h5").
-- `verbose`: show progress meter (true by default).
-- `deviceadapter`: adapter for device-backed arrays (defaults to `Array`). To use GPU arrays,
-  pass e.g. `CUDA.CuArray` here (requires CUDA.jl).
-"""
-function simulate_phases(atm_spec::AtmosphereSpec{FT}; n::Int, batch::Int=DEFAULT_BATCH, filename="simulation.h5",
-        verbose=true, deviceadapter=Array) where {FT}
-    batch = min(batch, n)
-    phasebuffers = prepare_phasebuffers(atm_spec, batch, deviceadapter)
-    simulation_run(filename, phasebuffers, nothing, nothing, n; verbose=verbose)
-end
