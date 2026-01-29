@@ -242,10 +242,5 @@ function simulate_phases(atm_spec::AtmosphereSpec{FT}; n::Int, batch::Int=DEFAUL
         verbose=true, deviceadapter=Array) where {FT}
     batch = min(batch, n)
     phasebuffers = prepare_phasebuffers(atm_spec, batch, deviceadapter)
-
-    h5open(filename, "w") do fid
-        phs_size = plate_size(atm_spec)
-        phs_dataset = create_dataset(fid, "phases", FT, (phs_size..., n), chunk=(phs_size..., batch))
-        simulation_run!!(nothing, phs_dataset, phasebuffers, nothing, nothing, n=n, verbose=verbose)
-    end
+    simulation_run(filename, phasebuffers, nothing, nothing, n; verbose=verbose)
 end

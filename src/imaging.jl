@@ -332,7 +332,7 @@ function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, batch::Int, device
     img_spec_adapt = adapt(deviceadapter, img_spec)
     ImgBufSerial(OpticalBuffers(T, img_spec_adapt, batch), img_spec_adapt, psf_norm(img_spec))
 end
-@inline function compute_images!(img_buf::ImgBufSerial, phases, true_sky)
+function compute_images!(img_buf::ImgBufSerial, phases, true_sky)
     psf!(img_buf.opt_buf, img_buf.spec, phases)
     apply_truesky!(img_buf.opt_buf, true_sky)
     readout!(img_buf.opt_buf, img_buf.spec.photon_count, img_buf.psf_norm)
@@ -357,7 +357,7 @@ function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, batch::Int, ::Type
     end
     return ImgBufParallel(opt_buf_vector, img_spec, psf_norm(img_spec), img_array)
 end
-@inline function compute_images!(img_buf::ImgBufParallel, phases, true_sky)
+function compute_images!(img_buf::ImgBufParallel, phases, true_sky)
     Threads.@threads for i in eachindex(img_buf.opt_bufs)
         op_buf = img_buf.opt_bufs[i]
         for j in i:length(img_buf.opt_bufs):size(phases, 3)
@@ -369,39 +369,84 @@ end
     return img_buf.img_array
 end
 
-function simulation_run!!(img_dataset, phs_dataset, phsbuffers, imgbuffers, truesky_adapt; n, verbose=true)
-    phs_size = plate_size(phsbuffers)
-    batch = batch_length(phsbuffers)
-    phase_buf_h5 = zeros(phase_type(phsbuffers), phs_size..., batch)
-    if imgbuffers !== nothing
-        img_size = image_size(imgbuffers)
-        image_buf_h5 = zeros(image_type(imgbuffers), img_size..., batch)
+struct BufferedDataset{Dt,Bt}
+    dataset::Dt
+    buffer::Bt
+end
+_make_buffer(ds::HDF5.Dataset) =
+    zeros(eltype(ds), HDF5.get_create_properties(ds).chunk::NTuple{3,Int})
+_make_buffer(::Union{<:AbstractArray, Nothing}) = nothing
+BufferedDataset(ds1) = BufferedDataset(ds1, _make_buffer(ds1))
+function write_batch!(dset::BufferedDataset{<:HDF5.Dataset}, j, batch)
+    copy!(dset.buffer, batch)
+    HDF5.do_write_chunk(dset.dataset, (1, 1, (j - 1) * size(batch, 3) + 1), dset.buffer)
+end
+function write_batch!(dset::BufferedDataset{<:AbstractArray}, j, batch)
+    batch_len = size(batch, 3)
+    dset_len = size(dset.dataset, 3)::Int
+    j1 = (j - 1) * batch_len + 1
+    if dset_len > j * batch_len
+        dset.dataset[:, :, j1:j1 + batch_len - 1] .= batch
+    else
+        dset.dataset[:, :, j1:end] .= @view batch[:, :, 1:dset_len - j1 + 1]
     end
+end
+write_batch!(::BufferedDataset{Nothing}, _, _) = nothing
+
+function simulation_run!!(img_dataset, phs_dataset, phsbuffers, imgbuffers, truesky_adapt, n; verbose=true)
+    batch = batch_length(phsbuffers)
     p = Progress(n, desc="Simulating images", enabled=verbose, dt=1)
     for j in 1:cld(n, batch)
         phases = samplephases!(phsbuffers)
         if imgbuffers !== nothing
             images = compute_images!(imgbuffers, phases, truesky_adapt)
-            if img_dataset !== nothing
-                if images isa Array
-                    HDF5.write_chunk(img_dataset, j - 1, images)
-                else
-                    copy!(image_buf_h5, images)
-                    HDF5.write_chunk(img_dataset, j - 1, image_buf_h5)
-                end
-            end
+            write_batch!(img_dataset, j, images)
         end
-        if phs_dataset !== nothing
-            if phases isa Array
-                HDF5.write_chunk(phs_dataset, j - 1, phases)
-            else
-                copy!(phase_buf_h5, phases)
-                HDF5.write_chunk(phs_dataset, j - 1, phase_buf_h5)
-            end
-        end
+        write_batch!(phs_dataset, j, phases)
         next!(p, step=min(batch, n - (j - 1) * batch))
     end
     finish!(p)
+end
+
+open_file(f::Function, filename::String) = h5open(f, filename, "w")
+open_file(f::Function, ::Nothing) = f(nothing)
+prepare_dataset(fid::HDF5.File, name::String, type, sz, n, batch) =
+    BufferedDataset(create_dataset(fid, name, type, (sz..., n), chunk=(sz..., batch)))
+prepare_dataset(::Nothing, ::String, ::Type{T}, sz, n, ::Int) where T =
+    BufferedDataset(Array{T}(undef, (sz..., n)))
+function simulation_run(filename, phsbuffers, imgbuffers, truesky_adapt, n;
+            verbose=true, savephases::Bool=true)
+    open_file(filename) do fid
+        batch = batch_length(phsbuffers)
+        if imgbuffers !== nothing
+            img_size = image_size(imgbuffers)
+            fid !== nothing && (fid["aperture"] = imgbuffers.spec.aperture)
+            img_dataset =
+                prepare_dataset(fid, "images", image_type(imgbuffers), img_size, n, batch)
+        else
+            img_dataset = BufferedDataset(nothing)
+        end
+        if savephases
+            phs_size = plate_size(phsbuffers)
+            phs_dataset =
+                prepare_dataset(fid, "phases", phase_type(phsbuffers), phs_size, n, batch)
+        else
+            phs_dataset = BufferedDataset(nothing)
+        end
+        simulation_run!!(img_dataset, phs_dataset, phsbuffers, imgbuffers, truesky_adapt, n;
+            verbose=verbose)
+        _data(x) = x.dataset isa Array ? x.dataset : nothing
+        if imgbuffers === nothing
+            return _data(phs_dataset)
+        else
+            out_ntuple = (phases = _data(phs_dataset), images = _data(img_dataset))
+            if all(isnothing, out_ntuple)
+                return nothing
+            else
+                return out_ntuple
+            end
+        end
+    end
 end
 
 """
@@ -443,23 +488,11 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec, atm_spec::AtmosphereS
     end
 
     batch = min(batch, n)
-    img_size = image_size(img_spec)
-    phs_size = plate_size(atm_spec)
     truesky_adapt = adapt(deviceadapter, truesky)
     phsbuffers = prepare_phasebuffers(atm_spec, batch, deviceadapter)
     imgbuffers = prepare_imgbuffers(T, img_spec, batch, deviceadapter)
-
-    h5open(filename, "w") do fid
-        fid["aperture"] = img_spec.aperture
-        img_dataset = create_dataset(fid, "images", T, (img_size..., n), chunk=(img_size..., batch))
-        if savephases
-            phs_dataset = create_dataset(fid, "phases", phase_type(phsbuffers), (phs_size..., n), chunk=(phs_size..., batch))
-        else
-            phs_dataset = nothing
-        end
-        simulation_run!!(img_dataset, phs_dataset, phsbuffers, imgbuffers, truesky_adapt;
-            n=n, verbose=verbose)
-    end
+    simulation_run(filename, phsbuffers, imgbuffers, truesky_adapt, n;
+        verbose=verbose, savephases=savephases)
 end
 simulate_images(img_spec::ImagingSpec{T}, phase_sampler::AtmosphereSpec, true_sky::TrueSky=PointSource(); kwargs...) where {T} =
     simulate_images(isfinite_photons(img_spec.photon_count) ? Int : T, img_spec, phase_sampler, true_sky; kwargs...)
