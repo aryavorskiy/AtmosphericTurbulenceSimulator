@@ -139,15 +139,15 @@ You can also enable GPU acceleration by specifying a device adapter. For example
 ```julia
 using CUDA
 # Set up atmosphere, imaging spec, true sky as before
-simulate_images(img_spec, atm, ts; n=100_000, deviceadapter=CuArray)  # run on GPU
+simulate_images(img_spec, atm, ts; n=100_000, filename="simulation.h5", deviceadapter=CuArray)  # run on GPU
 ```
 
 !!! warning
-    As of v0.2, only [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) has been tested. [AMDGPU.jl](https://github.com/JuliaGPU/AMDGPU.jl) should work without issues, [Metal.jl](https://github.com/JuliaGPU/Metal.jl) will not produce PSFs due to missing FFT support. Please open an issue if you encounter problems with these or other backends.
+    As of current version, only [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) has been tested. [AMDGPU.jl](https://github.com/JuliaGPU/AMDGPU.jl) should work without issues, [Metal.jl](https://github.com/JuliaGPU/Metal.jl) will not produce PSFs due to missing FFT support. Please open an issue if you encounter problems with these or other backends.
 
 ### Memory considerations
 
 For very large grids or long runs:
 - Use Harding interpolation with `interpolate=:auto`
 - Reduce batch size if running out of RAM
-- Set `savephases=false` if phases aren't needed
+- Set `savephases=false` if phases aren't needed — this saves disk space

@@ -12,32 +12,21 @@
         img_spec3 = ImagingSpec(ap, pc, filter_spec=FilterSpec(1, bandwidth=0.1, tedge=0.5))
 
         for (ts, is) in zip((ts1, ts2, ts3), (img_spec, img_spec2, img_spec3))
-            tmpfile = tempname() * ".h5"
-            res = simulate_images(Int32, is, atm, ts; n=16, filename=tmpfile, verbose=false)
-            @test res === nothing  # When filename is given, should return nothing
+            res = simulate_images(Int32, is, atm, ts; n=16, filename=nothing, verbose=false)
+            @test res isa NamedTuple
+            @test keys(res) == (:phases, :images)
+            images = res.images
+            phases = res.phases
 
-            h5open(tmpfile, "r") do fid
-                @test haskey(fid, "images")
-                @test haskey(fid, "phases")
-                @test haskey(fid, "aperture")
+            @test size(images) == (32, 32, 16)
+            @test size(phases) == (16, 16, 16)
 
-                images = read(fid["images"])
-                phases = read(fid["phases"])
-                aperture = read(fid["aperture"])
-
-                @test size(images) == (32, 32, 16)
-                @test size(phases) == (16, 16, 16)
-                @test size(aperture) == (16, 16)
-
-                # Total photon count should be approximately correct
-                # (within reasonable variance due to Poisson noise)
-                total_photons = sum(images, dims=(1,2))
-                expected = 1e6 + 100.0 * 32 * 32
-                @test total_photons ≈ fill(expected, size(total_photons)) rtol=0.05
-                @test eltype(images) == Int32
-            end
-
-            rm(tmpfile, force=true)
+            # Total photon count should be approximately correct
+            # (within reasonable variance due to Poisson noise)
+            total_photons = sum(images, dims=(1,2))
+            expected = 1e6 + 100.0 * 32 * 32
+            @test total_photons ≈ fill(expected, size(total_photons)) rtol=0.05
+            @test eltype(images) == Int32
         end
 
         @test_throws ArgumentError simulate_images(img_spec, SingleLayer((15, 15), 5), ts1; n=16)

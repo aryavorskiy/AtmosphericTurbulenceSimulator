@@ -169,7 +169,7 @@ end
 Create an imaging system specification.
 
 # Arguments
-- `T`: desired numeric element type, inferred from `aperture` if not provided.
+- `T`: desired number type, inferred from `aperture` if not provided.
 - `aperture`: 2D aperture (pupil) array describing the telescope pupil.
 - `photon_count`: `PhotonCount` instance describing the photon budget and background.
 
@@ -295,7 +295,7 @@ Create a circular (optionally anti-aliased) aperture array of shape `sz`. Return
 numeric array suitable for use as an aperture in `ImagingSpec`.
 
 # Arguments
-- `T`: desired numeric element type, `Float64` by default.
+- `T`: desired number type, `Float64` by default.
 - `sz`: aperture size `(nx, ny)`.
 - `radius`: radius of the circular aperture in pixels. Defaults to the largest that fits.
 - `aa_dist`: anti-aliasing transition width in pixels at the aperture edge.

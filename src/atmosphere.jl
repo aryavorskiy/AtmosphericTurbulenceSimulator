@@ -10,9 +10,9 @@ Compute the phase covariance matrix of a turbulent layer in the atmosphere, foll
 term is excluded in this model. This function assumes unit Fried parameter ``r_0 = 1 px``.
 
 # Arguments
+- `T`: number type for the covariance matrix (default matches `W` if provided, otherwise `Float64`).
 - `W`: the aperture function as a 2D array of weights. Normalized to `sum(W) == 1` internally.
 - `size`: a tuple `(nx, ny)` specifying the size of the aperture function.
-- `T`: element type for the covariance matrix (default `Float64`). If the aperture function `W` is provided, its element type is used.
 """
 function kolmogorov_covmat(W::AbstractMatrix)
     I = eachindex(IndexCartesian(), W)
@@ -87,11 +87,12 @@ function HardingSpec(final_size::NTuple{2,Int}; interpolate=0, interpolate_from=
 end
 
 """
-    SingleLayer(size, r0[; interpolate, interpolate_from, size_heuristics=1024])
+    SingleLayer([T, ]size, r0[; interpolate, interpolate_from, size_heuristics=1024])
 
 An `AtmosphereSpec` that produces independent (uncorrelated) phase frames for each timestep.
 
 # Arguments
+- `T`: the number type for phase screens (default `Float64`).
 - `size`: a tuple `(nx, ny)` specifying the phase screen shape in pixels (coarse sampler grid).
 - `r0`: Fried parameter (r₀) in pixels.
 

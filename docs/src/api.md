@@ -19,3 +19,9 @@ Pages = ["atmosphere.jl"]
 Modules = [AtmosphericTurbulenceSimulator]
 Pages = ["imaging.jl"]
 ```
+
+## Running simulations
+```@autodocs
+Modules = [AtmosphericTurbulenceSimulator]
+Pages = ["simulation.jl"]
+```

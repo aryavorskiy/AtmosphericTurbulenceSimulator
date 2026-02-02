@@ -117,7 +117,7 @@ Please note that this package is in early development. There are multiple featur
     - [ ] Frozen flow
     - [ ] Multi-layer atmospheres
     - [ ] Fresnel propagation
-- [ ] Multi-wavelength imaging
+- [x] Multi-wavelength imaging
 - [ ] Coronagraph models
 - [ ] Wavefront sensor simulation (?)
 - [ ] FITS support (?)
