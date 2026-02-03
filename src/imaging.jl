@@ -25,41 +25,51 @@ FilterSpec(base_wavelength::T1, wavelengths::AbstractVector{T2},
 MonoFilterSpec(::Type{T}=Int) where T = FilterSpec{T}(1, [1], [1])
 nwavel(fs::FilterSpec) = length(fs.wavelengths)
 
-struct Interpolator{IT,VT}
+struct BilinearInterpolator{IT,VT}
     ix::IT
     iy::IT
     ixp1::IT
     iyp1::IT
     tx::VT
     ty::VT
+    can_ff::Bool
 end
-function Interpolator(array::AbstractArray, scale::Real)
-    nx, ny = size(array)
+function BilinearScale(to::AbstractArray, scale::Real)
+    nx, ny = size(to)
     sx = range((1 - nx ÷ 2) / scale + nx ÷ 2 + 1, step=1/scale, length=nx)
     sy = range((1 - ny ÷ 2) / scale + ny ÷ 2 + 1, step=1/scale, length=ny)
-    ix = copy!(similar(array, Int, nx), clamp.(floor.(Int, sx), 1, nx))
-    iy = copy!(similar(array, Int, ny), clamp.(floor.(Int, sy), 1, ny))
-    ixp1 = copy!(similar(array, Int, nx), clamp.(ceil.(Int, sx), 1, nx))
-    iyp1 = copy!(similar(array, Int, ny), clamp.(ceil.(Int, sy), 1, ny))
-    tx = copy!(similar(array, nx), (sx .- ix))
-    ty = copy!(similar(array, ny), (sy .- iy))
-    return Interpolator(ix, iy, ixp1, iyp1, tx, ty)
+    ix = copy!(similar(to, Int, nx), clamp.(floor.(Int, sx), 1, nx))
+    iy = copy!(similar(to, Int, ny), clamp.(floor.(Int, sy), 1, ny))
+    ixp1 = copy!(similar(to, Int, nx), clamp.(ceil.(Int, sx), 1, nx))
+    iyp1 = copy!(similar(to, Int, ny), clamp.(ceil.(Int, sy), 1, ny))
+    tx = copy!(similar(to, nx), (sx .- ix))
+    ty = copy!(similar(to, ny), (sy .- iy))
+    return BilinearInterpolator(ix, iy, ixp1, iyp1, tx, ty, scale≈1)
 end
-function interpolate_add!(to::AbstractArray, from::AbstractArray, interp::Interpolator, f)
-    size(from)[1:2] == length.((interp.ix, interp.iy)) == length.((interp.ixp1, interp.iyp1)) ||
-        throw(DimensionMismatch("incmpatible Interpolator dimensions"))
-    size(to) == size(from) ||
-        throw(DimensionMismatch("src and dest must have matching sizes"))
+function BilinearShift(to::AbstractArray, offset::NTuple{2})
+    nx, ny = size(to)
+    ix = range(floor(Int, 1 + offset[1]), length=nx)
+    iy = range(floor(Int, 1 + offset[2]), length=ny)
+    ixp1 = range(ceil(Int, 1 + offset[1]), length=nx)
+    iyp1 = range(ceil(Int, 1 + offset[2]), length=ny)
+    tx = convert(eltype(to), offset[1] - floor(offset[1]))
+    ty = convert(eltype(to), offset[2] - floor(offset[2]))
+    return BilinearInterpolator(ix, iy, ixp1, iyp1, tx, ty, all(isinteger, offset))
+end
+function interpolate_mapmuladd!(to::AbstractArray, from::AbstractArray, interp::BilinearInterpolator, factor, g=identity)
     tx = interp.tx
-    ty = reshape(interp.ty, (1, :))
-    @views @inbounds @. to += f * (
-        (1 - tx) * (1 - ty) * from[interp.ix, interp.iy, :] +
-        tx * (1 - ty) * from[interp.ixp1, interp.iy, :] +
-        (1 - tx) * ty * from[interp.ix, interp.iyp1, :] +
-        tx * ty * from[interp.ixp1, interp.iyp1, :])
+    ty = interp.ty'
+    if interp.can_ff
+        @views @inbounds @. to += factor * g(from[interp.ix, interp.iy, :])
+    else
+        @views @inbounds @. to += factor * g(
+            (1 - tx) * (1 - ty) * from[interp.ix, interp.iy, :] +
+            tx * (1 - ty) * from[interp.ixp1, interp.iy, :] +
+            (1 - tx) * ty * from[interp.ix, interp.iyp1, :] +
+            tx * ty * from[interp.ixp1, interp.iyp1, :])
+    end
     return to
 end
-
 
 """
     FilterSpec(base_wavelength; bandwidth[, tcenter=1, tedge=1, npts=7])
@@ -97,6 +107,11 @@ PhotonCount(nphotons::Real) = isinf(nphotons) ? PhotonCount(Inf, zero(Float64)) 
 Base.convert(::Type{PhotonCount{T}}, pc::PhotonCount) where T<:Real =
     PhotonCount{T}(pc.nphotons, pc.background)
 isfinite_photons(pc::PhotonCount) = isfinite(pc.nphotons)
+
+struct Exposure
+    exptime::Float64
+    nsteps::Int
+end
 
 abstract type TrueSky end
 
@@ -159,6 +174,7 @@ struct ImagingSpec{T, AT<:AbstractMatrix{T}}
     aperture::AT
     photon_count::PhotonCount{T}
     filter_spec::FilterSpec{T}
+    exposure_spec::Exposure
     img_size::NTuple{2,Int}
 end
 
@@ -185,10 +201,12 @@ Create an imaging system specification.
 """
 function ImagingSpec(aperture::AbstractMatrix{T}, photon_count::PhotonCount;
     filter_spec::FilterSpec=MonoFilterSpec(), nyquist_oversample::Real=1,
+    exposure=0,
     img_size::NTuple{2,Int}=round.(Int, size(aperture) .* 2 .* nyquist_oversample)) where T<:Real
     fs = convert(FilterSpec{T}, filter_spec)
     pc = convert(PhotonCount{T}, photon_count)
-    return ImagingSpec{T, typeof(aperture)}(aperture, pc, fs, img_size)
+    ex = exposure isa Number ? Exposure(exposure, 5) : exposure
+    return ImagingSpec{T, typeof(aperture)}(aperture, pc, fs, ex, img_size)
 end
 function ImagingSpec(aperture::AbstractMatrix; nphotons, background=nothing, kw...)
     if background === nothing
@@ -202,11 +220,12 @@ ImagingSpec(::Type{T}, aperture::AbstractMatrix, args...; kw...) where T<:Real =
     ImagingSpec(convert.(T, aperture), args...; kw...)
 
 Adapt.adapt_structure(to, img_spec::ImagingSpec) =
-    ImagingSpec(Adapt.adapt_storage(to, img_spec.aperture), img_spec.photon_count, img_spec.filter_spec, img_spec.img_size)
+    ImagingSpec(Adapt.adapt_storage(to, img_spec.aperture), img_spec.photon_count,
+    img_spec.filter_spec, img_spec.exposure_spec, img_spec.img_size)
 plate_size(img_spec::ImagingSpec) = size(img_spec.aperture)
 image_size(img_spec::ImagingSpec) = img_spec.img_size
 psf_norm(img_spec::ImagingSpec) = sum(abs2, img_spec.aperture) * prod(img_spec.img_size) *
-        sum(img_spec.filter_spec.intensities)
+        sum(img_spec.filter_spec.intensities) * length(img_spec.exposure_spec.nsteps)
 
 struct OpticalBuffers{MT, MT2, MT3, PT, IT}
     aperture_buffer::MT
@@ -225,37 +244,32 @@ function OpticalBuffers(::Type{T}, img_spec::ImagingSpec{NT}, batch::Int) where 
     buf2 = similar(buf1)
     psf_buf = similar(buf1, NT, img_spec.img_size..., batch)
     read_buf = similar(buf1, T, img_spec.img_size..., batch)
-    interpolators = [Interpolator(psf_buf, img_spec.filter_spec.wavelengths[w] /
+    interpolators = [BilinearScale(psf_buf, img_spec.filter_spec.wavelengths[w] /
         img_spec.filter_spec.base_wavelength) for w in 1:nwavel(img_spec.filter_spec)]
     return OpticalBuffers(buf1, buf2, psf_buf, read_buf, plan_fft(buf1, (1, 2)), interpolators)
 end
-
-function write_phases!(aperture_buffer, phases, aperture, filter_spec)
-    M, N = size(phases)
+function write_phases!(aperture_buffer, phases, aperture, filter_spec, offset)
+    M, N = size(aperture)
     Cx, Cy = size(aperture_buffer) .÷ 2
     fill!(aperture_buffer, 0)
     for w in 1:nwavel(filter_spec)
         scale = filter_spec.wavelengths[w] / filter_spec.base_wavelength
-        @. aperture_buffer[Cx - M ÷ 2 + 1:Cx - M ÷ 2 + M, Cy - N ÷ 2 + 1:Cy - N ÷ 2 + N, :, w] =
-            aperture * cis(scale * phases)
+        ap_slice = @view aperture_buffer[Cx - M ÷ 2 + 1:Cx - M ÷ 2 + M, Cy - N ÷ 2 + 1:Cy - N ÷ 2 + N, :, w]
+        interpolate_mapmuladd!(ap_slice, phases, offset, aperture, ComposedFunction(cis, Base.Fix2(*, scale)))
     end
 end
+write_phases!(bufs::OpticalBuffers, phases, img_spec::ImagingSpec, offset) =
+    write_phases!(bufs.focal_buffer, phases, img_spec.aperture, img_spec.filter_spec, offset)
 
-function psf!(bufs::OpticalBuffers, img_spec::ImagingSpec, phases)
-    write_phases!(bufs.focal_buffer, phases, img_spec.aperture, img_spec.filter_spec)
+function phases_to_psf!(bufs::OpticalBuffers, img_spec::ImagingSpec)
     mul!(bufs.aperture_buffer, bufs.fftplan, bufs.focal_buffer)
     fftshift!(bufs.focal_buffer, bufs.aperture_buffer, (1, 2))
     bufs.aperture_buffer .= abs2.(bufs.focal_buffer)
-    fill!(bufs.psf_buffer, 0)
     for w in 1:nwavel(img_spec.filter_spec)
         mono_psf_block = view(bufs.aperture_buffer, :, :, :, w)
         scale = img_spec.filter_spec.wavelengths[w] / img_spec.filter_spec.base_wavelength
         factor = img_spec.filter_spec.intensities[w] / scale^2
-        if scale ≈ 1
-            bufs.psf_buffer .+= mono_psf_block .* factor
-        else
-            interpolate_add!(bufs.psf_buffer, mono_psf_block, bufs.interpolators[w], factor)
-        end
+        interpolate_mapmuladd!(bufs.psf_buffer, mono_psf_block, bufs.interpolators[w], factor)
     end
 end
 
@@ -319,33 +333,50 @@ end
 CircularAperture(sz::NTuple{2}, radius=minimum((sz .- 1) .÷ 2); kw...) =
     CircularAperture(Float64, sz, radius; kw...)
 
-struct ImgBufSerial{BT<:OpticalBuffers, ST<:ImagingSpec, FT<:Real}
+function padded_plate_size(atm_spec::SingleLayer, img_spec::ImagingSpec)
+    max_offset = atm_spec.wind_velocity .* img_spec.exposure_spec.exptime
+    return plate_size(img_spec) .+ ceil.(Int, abs.(max_offset))
+end
+function offsets(atm_spec::SingleLayer, img_spec::ImagingSpec)
+    n = img_spec.exposure_spec.nsteps
+    offset_list = [atm_spec.wind_velocity .* (img_spec.exposure_spec.exptime * j / n) for j in 0:n-1]
+    mins = minimum(first, offset_list), minimum(last, offset_list)
+    return [BilinearShift(img_spec.aperture, offset .- mins) for offset in offset_list]
+end
+struct ImgBufSerial{BT<:OpticalBuffers, ST<:ImagingSpec, FT<:Real, OT}
     opt_buf::BT
     spec::ST
     psf_norm::FT
+    offsets::Vector{OT}
 end
 image_size(img_buf::ImgBufSerial) = image_size(img_buf.opt_buf)
 image_type(img_buf::ImgBufSerial) = image_type(img_buf.opt_buf)
-function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, batch::Int, deviceadapter) where T
+function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int, deviceadapter) where T
     img_spec_adapt = adapt(deviceadapter, img_spec)
-    ImgBufSerial(OpticalBuffers(T, img_spec_adapt, batch), img_spec_adapt, psf_norm(img_spec))
+    return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec), batch, deviceadapter),
+        ImgBufSerial(OpticalBuffers(T, img_spec_adapt, batch), img_spec_adapt, psf_norm(img_spec), offsets(atm_spec, img_spec))
 end
 function compute_images!(img_buf::ImgBufSerial, phases, true_sky)
-    psf!(img_buf.opt_buf, img_buf.spec, phases)
+    fill!(img_buf.opt_buf.psf_buffer, 0)
+    for offset in img_buf.offsets
+        write_phases!(img_buf.opt_buf, phases, img_buf.spec, offset)
+        phases_to_psf!(img_buf.opt_buf, img_buf.spec)
+    end
     apply_truesky!(img_buf.opt_buf, true_sky)
     readout!(img_buf.opt_buf, img_buf.spec.photon_count, img_buf.psf_norm)
     return img_buf.opt_buf.read_buffer
 end
 
-struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,AT}
+struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT}
     opt_bufs::Vector{BT}
     spec::ST
     psf_norm::FT
+    offsets::Vector{OT}
     img_array::AT
 end
 image_size(img_buf::ImgBufParallel) = image_size(img_buf.opt_bufs[1])
 image_type(img_buf::ImgBufParallel) = eltype(img_buf.img_array)
-function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, batch::Int, ::Type{<:Array}) where T
+function prepare_buffers(::Type{T}, atm_spec::Union{AtmosphereSpec, Nothing}, img_spec::ImagingSpec, batch::Int, deviceadapter::Type{<:Array}) where T
     imgbuf1 = OpticalBuffers(T, img_spec, 1)
     img_array = similar(imgbuf1.read_buffer, image_size(img_spec)..., batch)
     opt_buf_vector = Array{typeof(imgbuf1)}(undef, Threads.nthreads())
@@ -353,13 +384,18 @@ function prepare_imgbuffers(::Type{T}, img_spec::ImagingSpec, batch::Int, ::Type
     Threads.@threads for i in 2:Threads.nthreads()
         opt_buf_vector[i] = OpticalBuffers(T, img_spec, 1)
     end
-    return ImgBufParallel(opt_buf_vector, img_spec, psf_norm(img_spec), img_array)
+    return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec), batch, deviceadapter),
+        ImgBufParallel(opt_buf_vector, img_spec, psf_norm(img_spec), offsets(atm_spec, img_spec), img_array)
 end
 function compute_images!(img_buf::ImgBufParallel, phases, true_sky)
     Threads.@threads for i in eachindex(img_buf.opt_bufs)
         op_buf = img_buf.opt_bufs[i]
         for j in i:length(img_buf.opt_bufs):size(phases, 3)
-            psf!(op_buf, img_buf.spec, view(phases, :, :, j))
+            fill!(op_buf.psf_buffer, 0)
+            for offset in img_buf.offsets
+                write_phases!(op_buf, view(phases, :, :, j), img_buf.spec, offset)
+                phases_to_psf!(op_buf, img_buf.spec)
+            end
             apply_truesky!(op_buf, true_sky)
             readout!(view(img_buf.img_array, :, :, j), op_buf.psf_buffer, img_buf.spec.photon_count, img_buf.psf_norm)
         end

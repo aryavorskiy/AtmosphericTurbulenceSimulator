@@ -10,9 +10,8 @@ using PrecompileTools
             photon_count = PhotonCount(1e6, 100)
             filter_spec = FilterSpec(500; bandwidth=100)
             img_spec = ImagingSpec(aperture, photon_count; filter_spec=filter_spec, img_size=(32, 32))
-            img_buf = prepare_imgbuffers(IT, img_spec, 1, Array)
-            atm2 = SingleLayer(T, (16, 16), 50.0, interpolate=1)
-            ph_buf2 = prepare_phasebuffers(atm2, 1, Array)
+            atm2 = SingleLayer(T, 50.0, interpolate=1)
+            img_buf, ph_buf2 = prepare_buffers(IT, atm2, img_spec, 1, Array)
             # simulation_run!!(BufferedDataset(nothing), BufferedDataset(nothing), ph_buf2, img_buf, truesky; n=1, verbose=false)
         end
     end

@@ -81,13 +81,14 @@ function simulation_run(filename, phsbuffers, imgbuffers, true_sky_adapt, n;
 end
 
 """
-    simulate_phases(atm_spec::AtmosphereSpec; n, [batch, filename, verbose, deviceadapter])
+    simulate_phases(atm_spec::AtmosphereSpec, plate_size; n, [batch, filename, verbose, deviceadapter])
 
 Simulate `n` phase screens using the provided atmosphere specification and write
 the results to an HDF5 file.
 
 # Arguments
 - `atm_spec`: an `AtmosphereSpec` used to produce phase screens.
+- `plate_size`: the size of the phase screens to simulate.
 
 # Keyword Arguments
 - `n`: number of phase screens to simulate.
@@ -98,10 +99,10 @@ the results to an HDF5 file.
 - `deviceadapter`: adapter for device-backed arrays (defaults to `Array`). To use GPU arrays,
   pass e.g. `CUDA.CuArray` here (requires CUDA.jl).
 """
-function simulate_phases(atm_spec::AtmosphereSpec; n::Int, batch::Int=DEFAULT_BATCH, filename=nothing,
+function simulate_phases(atm_spec::AtmosphereSpec, plate_size; n::Int, batch::Int=DEFAULT_BATCH, filename=nothing,
         verbose=true, deviceadapter=Array)
     batch = min(batch, n)
-    phase_buffers = prepare_phasebuffers(atm_spec, batch, deviceadapter)
+    phase_buffers = prepare_phasebuffers(atm_spec, plate_size, batch, deviceadapter)
     simulation_run(filename, phase_buffers, nothing, nothing, n; verbose=verbose)
 end
 
@@ -135,10 +136,6 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec, atm_spec::AtmosphereS
     if !isfinite_photons(img_spec.photon_count) && T <: Integer
         throw(ArgumentError("Integer image eltype not compatible with infinite-photon imaging spec."))
     end
-    if plate_size(img_spec) != plate_size(atm_spec)
-        throw(ArgumentError("Telescope plate size $(plate_size(img_spec)) does not match" *
-            "AtmosphereSpec plate size $(plate_size(atm_spec))."))
-    end
     if true_sky isa TrueSkyImage && size(true_sky.true_sky_fft) != image_size(img_spec)
         throw(ArgumentError("TrueSkyImage size $(size(true_sky.true_sky_fft)) does not match " *
             "image size $(image_size(img_spec))."))
@@ -146,8 +143,7 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec, atm_spec::AtmosphereS
 
     batch = min(batch, n)
     true_sky_adapt = adapt(deviceadapter, true_sky)
-    phase_buffers = prepare_phasebuffers(atm_spec, batch, deviceadapter)
-    image_buffers = prepare_imgbuffers(T, img_spec, batch, deviceadapter)
+    phase_buffers, image_buffers = prepare_buffers(T, atm_spec, img_spec, batch, deviceadapter)
     simulation_run(filename, phase_buffers, image_buffers, true_sky_adapt, n;
         verbose=verbose, savephases=savephases)
 end

@@ -55,9 +55,10 @@ function samplephases!(sampler::KarhunenLoeveBuffers)
     return reshape(sampler.out_buffer, (sampler.shape..., size(sampler.out_buffer, 2)))
 end
 
-struct HardingSpec{N}
-    interpolate_to::NTuple{2,Int}
-    interpolate_from::NTuple{2,Int}
+struct HardingSpec
+    size_to::NTuple{2,Int}
+    size_from::NTuple{2,Int}
+    steps::Int
 end
 function HardingSpec(final_size::NTuple{2,Int}; interpolate=0, interpolate_from=nothing, size_heuristics=1024)
     if interpolate_from !== nothing
@@ -69,10 +70,10 @@ function HardingSpec(final_size::NTuple{2,Int}; interpolate=0, interpolate_from=
             interpolated_size = 2 .* interpolated_size .- 11
             n += 1
         end
-        return HardingSpec{n}(final_size, interpolate_from)
+        return HardingSpec(final_size, interpolate_from, n)
     elseif interpolate isa Number
         interpolate_from = cld.(final_size .- 11, 2^interpolate) .+ 11
-        return HardingSpec{interpolate}(final_size, interpolate_from)
+        return HardingSpec(final_size, interpolate_from=interpolate_from)
     elseif interpolate === :auto
         n = 0
         interpolate_from = final_size
@@ -80,7 +81,7 @@ function HardingSpec(final_size::NTuple{2,Int}; interpolate=0, interpolate_from=
             n += 1
             interpolate_from = cld.(final_size .- 11, 2^n) .+ 11
         end
-        return HardingSpec{n}(final_size, interpolate_from)
+        return HardingSpec(final_size, interpolate_from, n)
     else
         throw(ArgumentError("`interpolate` must be a Number or :auto"))
     end
@@ -110,42 +111,44 @@ An `AtmosphereSpec` that produces independent (uncorrelated) phase frames for ea
 The Harding interpolation follows "Fast simulation of a Kolmogorov phase screen"
 Cressida M. Harding, Rachel A. Johnston, and Richard G. Lane, APPLIED OPTICS Vol. 38, No. 11, April 1999
 """
-struct SingleLayer{T<:Real,N} <: AtmosphereSpec{T}
-    harding::HardingSpec{N}
+struct SingleLayer{T<:Real,T2<:Real,KT} <: AtmosphereSpec{T}
     r₀::T
+    wind_velocity::NTuple{2,T2}
+    harding_kw::KT
 end
-SingleLayer(sz::NTuple{2,Int}, r0::Real; kw...) =
-    SingleLayer(HardingSpec(sz; kw...), float(r0))
-SingleLayer(::Type{T}, sz::NTuple{2,Int}, r0; kw...) where T =
-    SingleLayer(HardingSpec(sz; kw...), convert(T, r0))
-plate_size(spec::SingleLayer) = spec.harding.interpolate_to
-function prepare_phasebuffers(spec::SingleLayer{T,N} where T, batch::Int, deviceadapter) where {N}
-    low_size = spec.harding.interpolate_from
-    low_r₀ = spec.r₀ / 2^N
+function SingleLayer(r0::Real; wind_velocity=(0, 0), kw...)
+    SingleLayer(float(r0), wind_velocity, kw)
+end
+SingleLayer(::Type{T}, r0::Real; kw...) where T =
+    SingleLayer(convert(T, r0); kw...)
+function prepare_phasebuffers(spec::SingleLayer, plate_size::NTuple{2,Int}, batch::Int, deviceadapter)
+    harding = HardingSpec(plate_size; spec.harding_kw...)
+    low_size = harding.size_from
+    low_r₀ = spec.r₀ / 2^harding.steps
     covar = Adapt.adapt_storage(deviceadapter, kolmogorov_covmat(typeof(low_r₀), low_size))
     covar .*= low_r₀^(-5/3)
     E, U = eigen(Symmetric(covar))
     kl = KarhunenLoeveBuffers(low_size, (E, U), batch)
-    return HardingInterpolator(kl, kl.out_buffer, low_r₀, spec.harding)
+    return HardingInterpolator(kl, kl.out_buffer, low_r₀, harding)
 end
 
-struct HardingInterpolator{BT,NAT<:Tuple}
+struct HardingInterpolator{BT,NAT}
     base::BT
     out_buffers::NAT
     noise_std::Float64
     crop_size::NTuple{2,Int}
 end
-function HardingInterpolator(base, out_buffer, r0::Number, hspec::HardingSpec{N}) where N
-    low_size = hspec.interpolate_from
+function HardingInterpolator(base, out_buffer, r0::Number, hspec::HardingSpec)
+    low_size = hspec.size_from
     any(low_size .≤ 11) && throw(ArgumentError("Dimensions must be greater than 11"))
-    buffers = ntuple(Val(N)) do i
+    buffers = map(1:hspec.steps) do i
         lsz = low_size
         for _ in 1:i
             lsz = 2 .* lsz .- 11
         end
         similar(out_buffer, (lsz .+ 10)..., batch_length(base))
     end
-    return HardingInterpolator(base, buffers, sqrt(0.5265 / r0^(5/3)), hspec.interpolate_to)
+    return HardingInterpolator(base, buffers, sqrt(0.5265 / r0^(5/3)), hspec.size_to)
 end
 plate_size(sampler::HardingInterpolator) = sampler.crop_size
 batch_length(sampler::HardingInterpolator) = batch_length(sampler.base)
@@ -154,7 +157,7 @@ phase_type(sampler::HardingInterpolator) = phase_type(sampler.base)
 function samplephases!(harding::HardingInterpolator)
     low = samplephases!(harding.base)
     N = length(harding.out_buffers)
-    N == 0 && return low
+    N == 0 && return @view low[1:end, 1:end, :] # Ensure the same view type is returned
     harding_upsample!(harding.out_buffers[1], low, harding.noise_std)
     for i in 2:N
         prev_buf = harding.out_buffers[i - 1]
