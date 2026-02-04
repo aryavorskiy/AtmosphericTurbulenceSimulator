@@ -1,22 +1,24 @@
+import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
+
 @testset "Constructors" begin
     @testset "SingleLayer" begin
-        # Test construction without interpolation
-        atm = SingleLayer((16, 16), 5.0)
-        @test atm isa AtmosphericTurbulenceSimulator.SingleLayer
+        atm = SingleLayer(5.0)
+        @test atm isa SingleLayer
         @test atm.r₀ == 5.0
 
-        # Test with interpolation
-        atm_auto = SingleLayer((64, 64), 5.0; interpolate=:auto)
-        @test atm_auto isa SingleLayer{Float64, 2}
-        @test atm_auto.harding.interpolate_to == (64, 64)
-        @test atm_auto.harding.interpolate_from == (25, 25)
+        # Test Harding interpolation
+        hspec = HardingSpec((64, 64); interpolate=:auto)
+        @test hspec.nsteps == 2
+        @test hspec.size_to == (64, 64)
+        @test hspec.size_from == (25, 25)
 
-        atm_1pass = SingleLayer((64, 64), 5.0; interpolate=1)
-        @test atm_1pass.harding.interpolate_to == (64, 64)
-        @test atm_1pass.harding.interpolate_from == (38, 38)
+        hspec_1pass = HardingSpec((64, 64); interpolate=1)
+        @test hspec_1pass.nsteps == 1
+        @test hspec_1pass.size_to == (64, 64)
+        @test hspec_1pass.size_from == (38, 38)
 
         # Test that small interpolate_from throws error
-        @test_throws ArgumentError SingleLayer((64, 64), 5.0; interpolate_from=(8, 8))
+        @test_throws ArgumentError HardingSpec((64, 64); interpolate_from=(8, 8))
     end
 
     @testset "FilterSpec" begin
@@ -55,7 +57,7 @@
 
         # Test with filter
         filter = FilterSpec(500.0; bandwidth=100.0)
-        img_spec_filter = ImagingSpec(ap; nphotons=1e6, background=10, filter_spec=filter)
+        img_spec_filter = ImagingSpec(ap; nphotons=1e6, background=10, filter=FilterSpec(500.0; bandwidth=100.0))
         @test img_spec_filter.filter_spec.base_wavelength == 500.0
         @test img_spec_filter.photon_count.nphotons == 1e6
         @test img_spec_filter.photon_count.background == 10
@@ -83,5 +85,33 @@
 
         ts_img_f32 = TrueSkyImage(convert.(Float32, test_image))
         @test eltype(ts_img_f32.true_sky_fft) == ComplexF32
+    end
+
+    @testset "ImgBufSerial & ImgBufParallel" begin
+        ap = CircularAperture((16, 16))
+        img_spec = ImagingSpec(ap; nphotons=1e6, background=100)
+        atm = SingleLayer(5.0)
+
+        img_buf_serial = prepare_buffers(Int32, atm, img_spec, 5, identity)[2]
+        @test img_buf_serial isa AtmosphericTurbulenceSimulator.ImgBufSerial
+        @test length(img_buf_serial.offsets) == 1
+        @test img_buf_serial.offsets[1].can_ff
+
+        img_buf_parallel = prepare_buffers(Int32, atm, img_spec, 5, Array)[2]
+        @test img_buf_parallel isa AtmosphericTurbulenceSimulator.ImgBufParallel
+        @test length(img_buf_parallel.opt_bufs) == Threads.nthreads()
+        @test length(img_buf_parallel.offsets) == 1
+        @test img_buf_parallel.offsets[1].can_ff
+
+        img_spec2 = ImagingSpec(ap; nphotons=1e6, background=100, exposure=Exposure(0.1, 10))
+        img_buf2 = prepare_buffers(Int32, atm, img_spec2, 5, identity)[2]
+        @test length(img_buf2.offsets) == 1
+        @test img_buf2.offsets[1].can_ff
+
+        atm2 = SingleLayer(5.0; interpolate=:auto, wind_velocity=(10.0, 5.0))
+        img_buf3 = prepare_buffers(Int32, atm2, img_spec2, 5, identity)[2]
+        @test length(img_buf3.offsets) == 10
+        @test img_buf3.offsets[1].can_ff
+        @test !img_buf3.offsets[2].can_ff
     end
 end

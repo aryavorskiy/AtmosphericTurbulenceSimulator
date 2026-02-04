@@ -58,7 +58,7 @@ end
 struct HardingSpec
     size_to::NTuple{2,Int}
     size_from::NTuple{2,Int}
-    steps::Int
+    nsteps::Int
 end
 function HardingSpec(final_size::NTuple{2,Int}; interpolate=0, interpolate_from=nothing, size_heuristics=1024)
     if interpolate_from !== nothing
@@ -124,7 +124,7 @@ SingleLayer(::Type{T}, r0::Real; kw...) where T =
 function prepare_phasebuffers(spec::SingleLayer, plate_size::NTuple{2,Int}, batch::Int, deviceadapter)
     harding = HardingSpec(plate_size; spec.harding_kw...)
     low_size = harding.size_from
-    low_r₀ = spec.r₀ / 2^harding.steps
+    low_r₀ = spec.r₀ / 2^harding.nsteps
     covar = Adapt.adapt_storage(deviceadapter, kolmogorov_covmat(typeof(low_r₀), low_size))
     covar .*= low_r₀^(-5/3)
     E, U = eigen(Symmetric(covar))
@@ -134,21 +134,21 @@ end
 
 struct HardingInterpolator{BT,NAT}
     base::BT
-    out_buffers::NAT
+    out_bufs::NAT
     noise_std::Float64
     crop_size::NTuple{2,Int}
 end
-function HardingInterpolator(base, out_buffer, r0::Number, hspec::HardingSpec)
+function HardingInterpolator(base, array, r0::Number, hspec::HardingSpec)
     low_size = hspec.size_from
     any(low_size .≤ 11) && throw(ArgumentError("Dimensions must be greater than 11"))
-    buffers = map(1:hspec.steps) do i
+    bufs = map(1:hspec.nsteps) do i
         lsz = low_size
         for _ in 1:i
             lsz = 2 .* lsz .- 11
         end
-        similar(out_buffer, (lsz .+ 10)..., batch_length(base))
+        similar(array, (lsz .+ 10)..., batch_length(base))
     end
-    return HardingInterpolator(base, buffers, sqrt(0.5265 / r0^(5/3)), hspec.size_to)
+    return HardingInterpolator(base, bufs, sqrt(0.5265 / r0^(5/3)), hspec.size_to)
 end
 plate_size(sampler::HardingInterpolator) = sampler.crop_size
 batch_length(sampler::HardingInterpolator) = batch_length(sampler.base)
@@ -156,71 +156,71 @@ phase_type(sampler::HardingInterpolator) = phase_type(sampler.base)
 
 function samplephases!(harding::HardingInterpolator)
     low = samplephases!(harding.base)
-    N = length(harding.out_buffers)
+    N = length(harding.out_bufs)
     N == 0 && return @view low[1:end, 1:end, :] # Ensure the same view type is returned
-    harding_upsample!(harding.out_buffers[1], low, harding.noise_std)
+    harding_upsample!(harding.out_bufs[1], low, harding.noise_std)
     for i in 2:N
-        prev_buf = harding.out_buffers[i - 1]
-        harding_upsample!(harding.out_buffers[i], @view(prev_buf[6:end-5, 6:end-5, :]),
+        prev_buffer = harding.out_bufs[i - 1]
+        harding_upsample!(harding.out_bufs[i], @view(prev_buffer[6:end-5, 6:end-5, :]),
             harding.noise_std / 2^(5/6 * (i-1)))
     end
-    out_buf = harding.out_buffers[N]
-    crop_offset = (size(out_buf)[1:2] .- harding.crop_size) .÷ 2
-    return @view out_buf[
+    out_buffer = harding.out_bufs[N]
+    crop_offset = (size(out_buffer)[1:2] .- harding.crop_size) .÷ 2
+    return @view out_buffer[
         crop_offset[1] + 1:crop_offset[1] + harding.crop_size[1],
         crop_offset[2] + 1:crop_offset[2] + harding.crop_size[2],
         :]
 end
-function harding_upsample!(out_buf, low, noise_std)
+function harding_upsample!(to, from, noise_std)
     c_d = 0.3198
     c_m = -0.0341
     c_f = -0.0017
 
     # Padding offset
-    n, m = size(low)
+    n, m = size(from)
     inds_odd_x = range(5, length=n-4, step=2)
     inds_odd_y = range(5, length=m-4, step=2)
     inds_even_x = range(4, length=n-3, step=2)
     inds_even_y = range(4, length=m-3, step=2)
 
     # Copy low-res
-    @views copy!(out_buf[1:2:end, 1:2:end, :], low)
+    @views copy!(to[1:2:end, 1:2:end, :], from)
 
     # Interpolate checker pattern sites
-    randn!(@view out_buf[inds_even_x, inds_even_y, :])
-    @views @. out_buf[inds_even_x, inds_even_y, :] =
-        noise_std * out_buf[inds_even_x, inds_even_y, :] +
-        c_d * (out_buf[inds_even_x .+ 1, inds_even_y .+ 1, :] + out_buf[inds_even_x .+ 1, inds_even_y .- 1, :] +
-               out_buf[inds_even_x .- 1, inds_even_y .+ 1, :] + out_buf[inds_even_x .- 1, inds_even_y .- 1, :]) +
-        c_m * ((out_buf[inds_even_x .+ 3, inds_even_y .+ 1, :] + out_buf[inds_even_x .+ 3, inds_even_y .- 1, :] +
-               out_buf[inds_even_x .- 3, inds_even_y .+ 1, :] + out_buf[inds_even_x .- 3, inds_even_y .- 1, :]) +
-               (out_buf[inds_even_x .+ 1, inds_even_y .+ 3, :] + out_buf[inds_even_x .+ 1, inds_even_y .- 3, :] +
-               out_buf[inds_even_x .- 1, inds_even_y .+ 3, :] + out_buf[inds_even_x .- 1, inds_even_y .- 3, :])) +
-        c_f * (out_buf[inds_even_x .+ 3, inds_even_y .+ 3, :] + out_buf[inds_even_x .+ 3, inds_even_y .- 3, :] +
-               out_buf[inds_even_x .- 3, inds_even_y .+ 3, :] + out_buf[inds_even_x .- 3, inds_even_y .- 3, :])
+    randn!(@view to[inds_even_x, inds_even_y, :])
+    @views @. to[inds_even_x, inds_even_y, :] =
+        noise_std * to[inds_even_x, inds_even_y, :] +
+        c_d * (to[inds_even_x .+ 1, inds_even_y .+ 1, :] + to[inds_even_x .+ 1, inds_even_y .- 1, :] +
+               to[inds_even_x .- 1, inds_even_y .+ 1, :] + to[inds_even_x .- 1, inds_even_y .- 1, :]) +
+        c_m * ((to[inds_even_x .+ 3, inds_even_y .+ 1, :] + to[inds_even_x .+ 3, inds_even_y .- 1, :] +
+               to[inds_even_x .- 3, inds_even_y .+ 1, :] + to[inds_even_x .- 3, inds_even_y .- 1, :]) +
+               (to[inds_even_x .+ 1, inds_even_y .+ 3, :] + to[inds_even_x .+ 1, inds_even_y .- 3, :] +
+               to[inds_even_x .- 1, inds_even_y .+ 3, :] + to[inds_even_x .- 1, inds_even_y .- 3, :])) +
+        c_f * (to[inds_even_x .+ 3, inds_even_y .+ 3, :] + to[inds_even_x .+ 3, inds_even_y .- 3, :] +
+               to[inds_even_x .- 3, inds_even_y .+ 3, :] + to[inds_even_x .- 3, inds_even_y .- 3, :])
 
     # Fill remaining sites
-    randn!(@view out_buf[inds_odd_x, inds_even_y, :])
-    @views @. out_buf[inds_odd_x, inds_even_y, :] =
-        $(noise_std * 2^(-5/12)) * out_buf[inds_odd_x, inds_even_y, :] +
-        c_d * (out_buf[inds_odd_x, inds_even_y .+ 1, :] + out_buf[inds_odd_x, inds_even_y .- 1, :] +
-                out_buf[inds_odd_x .+ 1, inds_even_y, :] + out_buf[inds_odd_x .- 1, inds_even_y, :]) +
-        c_m * (out_buf[inds_odd_x .+ 1, inds_even_y .+ 2, :] + out_buf[inds_odd_x .+ 1, inds_even_y .- 2, :] +
-                out_buf[inds_odd_x .- 1, inds_even_y .+ 2, :] + out_buf[inds_odd_x .- 1, inds_even_y .- 2, :] +
-                out_buf[inds_odd_x .+ 2, inds_even_y .+ 1, :] + out_buf[inds_odd_x .+ 2, inds_even_y .- 1, :] +
-                out_buf[inds_odd_x .- 2, inds_even_y .+ 1, :] + out_buf[inds_odd_x .- 2, inds_even_y .- 1, :]) +
-        c_f * (out_buf[inds_odd_x .+ 3, inds_even_y, :] + out_buf[inds_odd_x .- 3, inds_even_y, :] +
-                out_buf[inds_odd_x, inds_even_y .+ 3, :] + out_buf[inds_odd_x, inds_even_y .- 3, :])
+    randn!(@view to[inds_odd_x, inds_even_y, :])
+    @views @. to[inds_odd_x, inds_even_y, :] =
+        $(noise_std * 2^(-5/12)) * to[inds_odd_x, inds_even_y, :] +
+        c_d * (to[inds_odd_x, inds_even_y .+ 1, :] + to[inds_odd_x, inds_even_y .- 1, :] +
+                to[inds_odd_x .+ 1, inds_even_y, :] + to[inds_odd_x .- 1, inds_even_y, :]) +
+        c_m * (to[inds_odd_x .+ 1, inds_even_y .+ 2, :] + to[inds_odd_x .+ 1, inds_even_y .- 2, :] +
+                to[inds_odd_x .- 1, inds_even_y .+ 2, :] + to[inds_odd_x .- 1, inds_even_y .- 2, :] +
+                to[inds_odd_x .+ 2, inds_even_y .+ 1, :] + to[inds_odd_x .+ 2, inds_even_y .- 1, :] +
+                to[inds_odd_x .- 2, inds_even_y .+ 1, :] + to[inds_odd_x .- 2, inds_even_y .- 1, :]) +
+        c_f * (to[inds_odd_x .+ 3, inds_even_y, :] + to[inds_odd_x .- 3, inds_even_y, :] +
+                to[inds_odd_x, inds_even_y .+ 3, :] + to[inds_odd_x, inds_even_y .- 3, :])
 
-    randn!(@view out_buf[inds_even_x, inds_odd_y, :])
-    @views @. out_buf[inds_even_x, inds_odd_y, :] =
-        $(noise_std * 2^(-5/12)) * out_buf[inds_even_x, inds_odd_y, :] +
-        c_d * (out_buf[inds_even_x .+ 1, inds_odd_y, :] + out_buf[inds_even_x .- 1, inds_odd_y, :] +
-                out_buf[inds_even_x, inds_odd_y .+ 1, :] + out_buf[inds_even_x, inds_odd_y .- 1, :]) +
-        c_m * (out_buf[inds_even_x .+ 1, inds_odd_y .+ 2, :] + out_buf[inds_even_x .+ 1, inds_odd_y .- 2, :] +
-                out_buf[inds_even_x .- 1, inds_odd_y .+ 2, :] + out_buf[inds_even_x .- 1, inds_odd_y .- 2, :] +
-                out_buf[inds_even_x .+ 2, inds_odd_y .+ 1, :] + out_buf[inds_even_x .+ 2, inds_odd_y .- 1, :] +
-                out_buf[inds_even_x .- 2, inds_odd_y .+ 1, :] + out_buf[inds_even_x .- 2, inds_odd_y .- 1, :]) +
-        c_f * (out_buf[inds_even_x .+ 3, inds_odd_y, :] + out_buf[inds_even_x .- 3, inds_odd_y, :] +
-                out_buf[inds_even_x, inds_odd_y .+ 3, :] + out_buf[inds_even_x, inds_odd_y .- 3, :])
+    randn!(@view to[inds_even_x, inds_odd_y, :])
+    @views @. to[inds_even_x, inds_odd_y, :] =
+        $(noise_std * 2^(-5/12)) * to[inds_even_x, inds_odd_y, :] +
+        c_d * (to[inds_even_x .+ 1, inds_odd_y, :] + to[inds_even_x .- 1, inds_odd_y, :] +
+                to[inds_even_x, inds_odd_y .+ 1, :] + to[inds_even_x, inds_odd_y .- 1, :]) +
+        c_m * (to[inds_even_x .+ 1, inds_odd_y .+ 2, :] + to[inds_even_x .+ 1, inds_odd_y .- 2, :] +
+                to[inds_even_x .- 1, inds_odd_y .+ 2, :] + to[inds_even_x .- 1, inds_odd_y .- 2, :] +
+                to[inds_even_x .+ 2, inds_odd_y .+ 1, :] + to[inds_even_x .+ 2, inds_odd_y .- 1, :] +
+                to[inds_even_x .- 2, inds_odd_y .+ 1, :] + to[inds_even_x .- 2, inds_odd_y .- 1, :]) +
+        c_f * (to[inds_even_x .+ 3, inds_odd_y, :] + to[inds_even_x .- 3, inds_odd_y, :] +
+                to[inds_even_x, inds_odd_y .+ 3, :] + to[inds_even_x, inds_odd_y .- 3, :])
 end
