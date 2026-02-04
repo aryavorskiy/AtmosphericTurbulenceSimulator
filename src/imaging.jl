@@ -111,8 +111,9 @@ isfinite_photons(pc::PhotonCount) = isfinite(pc.nphotons)
 struct Exposure
     exptime::Float64
     nsteps::Int
+    round_offsets::Bool
 end
-
+Exposure(exptime, nsteps=5; round_offsets=false) = Exposure(exptime, nsteps, round_offsets)
 abstract type TrueSky end
 
 """
@@ -205,7 +206,7 @@ function ImagingSpec(aperture::AbstractMatrix{T}, photon_count::PhotonCount;
     img_size::NTuple{2,Int}=round.(Int, size(aperture) .* 2 .* nyquist_oversample)) where T<:Real
     fs = convert(FilterSpec{T}, filter_spec)
     pc = convert(PhotonCount{T}, photon_count)
-    ex = exposure isa Number ? Exposure(exposure, 5) : exposure
+    ex = exposure isa Number ? Exposure(exposure) : exposure
     return ImagingSpec{T, typeof(aperture)}(aperture, pc, fs, ex, img_size)
 end
 function ImagingSpec(aperture::AbstractMatrix; nphotons, background=nothing, kw...)
@@ -225,7 +226,7 @@ Adapt.adapt_structure(to, img_spec::ImagingSpec) =
 plate_size(img_spec::ImagingSpec) = size(img_spec.aperture)
 image_size(img_spec::ImagingSpec) = img_spec.img_size
 psf_norm(img_spec::ImagingSpec) = sum(abs2, img_spec.aperture) * prod(img_spec.img_size) *
-        sum(img_spec.filter_spec.intensities) * length(img_spec.exposure_spec.nsteps)
+        sum(img_spec.filter_spec.intensities)
 
 struct OpticalBuffers{MT, MT2, MT3, PT, IT}
     aperture_buffer::MT
@@ -337,34 +338,45 @@ function padded_plate_size(atm_spec::SingleLayer, img_spec::ImagingSpec)
     max_offset = atm_spec.wind_velocity .* img_spec.exposure_spec.exptime
     return plate_size(img_spec) .+ ceil.(Int, abs.(max_offset))
 end
-function offsets(atm_spec::SingleLayer, img_spec::ImagingSpec)
+function long_exp_offsets(atm_spec::SingleLayer, img_spec::ImagingSpec)
     n = img_spec.exposure_spec.nsteps
-    offset_list = [atm_spec.wind_velocity .* (img_spec.exposure_spec.exptime * j / n) for j in 0:n-1]
+    if n == 1 || all(iszero, atm_spec.wind_velocity)
+        offset_list = [atm_spec.wind_velocity .* img_spec.exposure_spec.exptime .* 0]
+    else
+        offset_list = [atm_spec.wind_velocity .* (img_spec.exposure_spec.exptime * j / (n - 1)) for j in 0:n-1]
+    end
+    if img_spec.exposure_spec.round_offsets
+        offset_list = [round.(offset) for offset in offset_list]
+    end
     mins = minimum(first, offset_list), minimum(last, offset_list)
     return [BilinearShift(img_spec.aperture, offset .- mins) for offset in offset_list]
 end
+function computation_pass!(readout_to, opt_buffer::OpticalBuffers, spec::ImagingSpec, phases, true_sky, offsets, psf_norm)
+    fill!(opt_buffer.psf_buffer, 0)
+    for offset in offsets
+        write_phases!(opt_buffer, phases, spec, offset)
+        phases_to_psf!(opt_buffer, spec)
+    end
+    apply_truesky!(opt_buffer, true_sky)
+    readout!(readout_to, opt_buffer.psf_buffer, spec.photon_count, psf_norm * length(offsets))
+end
 struct ImgBufSerial{BT<:OpticalBuffers, ST<:ImagingSpec, FT<:Real, OT}
-    opt_buf::BT
+    opt_buffer::BT
     spec::ST
     psf_norm::FT
     offsets::Vector{OT}
 end
-image_size(img_buf::ImgBufSerial) = image_size(img_buf.opt_buf)
-image_type(img_buf::ImgBufSerial) = image_type(img_buf.opt_buf)
+image_size(img_buf::ImgBufSerial) = image_size(img_buf.opt_buffer)
+image_type(img_buf::ImgBufSerial) = image_type(img_buf.opt_buffer)
 function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int, deviceadapter) where T
     img_spec_adapt = adapt(deviceadapter, img_spec)
     return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec), batch, deviceadapter),
-        ImgBufSerial(OpticalBuffers(T, img_spec_adapt, batch), img_spec_adapt, psf_norm(img_spec), offsets(atm_spec, img_spec))
+        ImgBufSerial(OpticalBuffers(T, img_spec_adapt, batch), img_spec_adapt, psf_norm(img_spec), long_exp_offsets(atm_spec, img_spec))
 end
 function compute_images!(img_buf::ImgBufSerial, phases, true_sky)
-    fill!(img_buf.opt_buf.psf_buffer, 0)
-    for offset in img_buf.offsets
-        write_phases!(img_buf.opt_buf, phases, img_buf.spec, offset)
-        phases_to_psf!(img_buf.opt_buf, img_buf.spec)
-    end
-    apply_truesky!(img_buf.opt_buf, true_sky)
-    readout!(img_buf.opt_buf, img_buf.spec.photon_count, img_buf.psf_norm)
-    return img_buf.opt_buf.read_buffer
+    computation_pass!(img_buf.opt_buffer.read_buffer, img_buf.opt_buffer, img_buf.spec,
+        phases, true_sky, img_buf.offsets, img_buf.psf_norm)
+    return img_buf.opt_buffer.read_buffer
 end
 
 struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT}
@@ -377,27 +389,22 @@ end
 image_size(img_buf::ImgBufParallel) = image_size(img_buf.opt_bufs[1])
 image_type(img_buf::ImgBufParallel) = eltype(img_buf.img_array)
 function prepare_buffers(::Type{T}, atm_spec::Union{AtmosphereSpec, Nothing}, img_spec::ImagingSpec, batch::Int, deviceadapter::Type{<:Array}) where T
-    imgbuf1 = OpticalBuffers(T, img_spec, 1)
-    img_array = similar(imgbuf1.read_buffer, image_size(img_spec)..., batch)
-    opt_buf_vector = Array{typeof(imgbuf1)}(undef, Threads.nthreads())
-    opt_buf_vector[1] = imgbuf1
+    opt_buffer1 = OpticalBuffers(T, img_spec, 1)
+    img_array = similar(opt_buffer1.read_buffer, image_size(img_spec)..., batch)
+    opt_buf_vector = Array{typeof(opt_buffer1)}(undef, Threads.nthreads())
+    opt_buf_vector[1] = opt_buffer1
     Threads.@threads for i in 2:Threads.nthreads()
         opt_buf_vector[i] = OpticalBuffers(T, img_spec, 1)
     end
     return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec), batch, deviceadapter),
-        ImgBufParallel(opt_buf_vector, img_spec, psf_norm(img_spec), offsets(atm_spec, img_spec), img_array)
+        ImgBufParallel(opt_buf_vector, img_spec, psf_norm(img_spec), long_exp_offsets(atm_spec, img_spec), img_array)
 end
 function compute_images!(img_buf::ImgBufParallel, phases, true_sky)
     Threads.@threads for i in eachindex(img_buf.opt_bufs)
-        op_buf = img_buf.opt_bufs[i]
+        opt_buffer = img_buf.opt_bufs[i]
         for j in i:length(img_buf.opt_bufs):size(phases, 3)
-            fill!(op_buf.psf_buffer, 0)
-            for offset in img_buf.offsets
-                write_phases!(op_buf, view(phases, :, :, j), img_buf.spec, offset)
-                phases_to_psf!(op_buf, img_buf.spec)
-            end
-            apply_truesky!(op_buf, true_sky)
-            readout!(view(img_buf.img_array, :, :, j), op_buf.psf_buffer, img_buf.spec.photon_count, img_buf.psf_norm)
+            computation_pass!(view(img_buf.img_array, :, :, j), opt_buffer, img_buf.spec,
+                view(phases, :, :, j), true_sky, img_buf.offsets, img_buf.psf_norm)
         end
     end
     return img_buf.img_array

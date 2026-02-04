@@ -25,9 +25,9 @@
     end
 
     @testset "Phase screen generation" begin
-        atm = SingleLayer((32, 32), 5.0)
+        atm = SingleLayer(5.0)
         tmpfile = tempname() * ".h5"
-        res = simulate_phases(atm; n=16, filename=tmpfile, verbose=false)
+        res = simulate_phases(atm, (32, 32); n=16, filename=tmpfile, verbose=false)
         @test res === nothing  # When filename is given, should return nothing
         phases = h5read(tmpfile, "phases")
         @test size(phases) == (32, 32, 16)
@@ -38,12 +38,12 @@
 
     @testset "Phase statistics" begin
         # Generate phase screens and check basic statistics
-        atm1 = SingleLayer(Float32, (64, 64), 5, interpolate=2)
-        atm2 = SingleLayer(Float32, (64, 64), 5, interpolate_from=(15, 15))
+        atm1 = SingleLayer(Float32, 5, interpolate=2)
+        atm2 = SingleLayer(Float32, 5, interpolate_from=(15, 15))
 
         # Use temporary file
         for atm in (atm1, atm2)
-            phases = simulate_phases(atm; n=1000, filename=nothing, verbose=false)
+            phases = simulate_phases(atm, (64, 64); n=1000, filename=nothing, verbose=false)
             @test eltype(phases) == Float32
 
             for D in [(3, 2), (3, 15), (5, 5), (5, 20), (16, 2), (16, 16)]

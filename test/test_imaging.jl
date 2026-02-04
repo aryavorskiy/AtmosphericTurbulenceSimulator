@@ -1,6 +1,6 @@
 @testset "Imaging" begin
     ap = CircularAperture((16, 16))
-    atm = SingleLayer((16, 16), 5)
+    atm = SingleLayer(5)
     @testset "True sky" begin
         ts1 = PointSource()
         ts2 = DoubleSystem((3, 2), 0.6)
@@ -29,7 +29,6 @@
             @test eltype(images) == Int32
         end
 
-        @test_throws ArgumentError simulate_images(img_spec, SingleLayer((15, 15), 5), ts1; n=16)
         @test_throws ArgumentError simulate_images(img_spec, atm, TrueSkyImage(rand(16, 16)); n=16)
     end
 
