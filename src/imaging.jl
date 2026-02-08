@@ -58,7 +58,7 @@ function BilinearShift(to::AbstractArray, offset::NTuple{2})
 end
 function interpolate_mapmuladd!(to::AbstractArray, from::AbstractArray, interp::BilinearInterpolator, factor, g=identity)
     tx = interp.tx
-    ty = interp.ty'
+    ty = transpose(interp.ty)
     if interp.can_ff
         @views @inbounds @. to += factor * g(from[interp.ix, interp.iy, :])
     else
@@ -340,7 +340,7 @@ function padded_plate_size(atm_spec::SingleLayer, img_spec::ImagingSpec)
 end
 function long_exp_offsets(atm_spec::SingleLayer, img_spec::ImagingSpec)
     n = img_spec.exposure_spec.nsteps
-    if n == 1 || all(iszero, atm_spec.wind_velocity)
+    if n == 1 || iszero(img_spec.exposure_spec.exptime) || all(iszero, atm_spec.wind_velocity)
         offset_list = [atm_spec.wind_velocity .* img_spec.exposure_spec.exptime .* 0]
     else
         offset_list = [atm_spec.wind_velocity .* (img_spec.exposure_spec.exptime * j / (n - 1)) for j in 0:n-1]
@@ -388,7 +388,7 @@ struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT}
 end
 image_size(img_buf::ImgBufParallel) = image_size(img_buf.opt_bufs[1])
 image_type(img_buf::ImgBufParallel) = eltype(img_buf.img_array)
-function prepare_buffers(::Type{T}, atm_spec::Union{AtmosphereSpec, Nothing}, img_spec::ImagingSpec, batch::Int, deviceadapter::Type{<:Array}) where T
+function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int, deviceadapter::Type{<:Array}) where T
     opt_buffer1 = OpticalBuffers(T, img_spec, 1)
     img_array = similar(opt_buffer1.read_buffer, image_size(img_spec)..., batch)
     opt_bufs = Array{typeof(opt_buffer1)}(undef, Threads.nthreads())

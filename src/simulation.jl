@@ -39,19 +39,34 @@ function simulation_run!!(img_bd, phs_bd, phase_buffers, image_buffers, true_sky
     finish!(p)
 end
 
-open_file(f::Function, filename::String) = h5open(f, filename, "w")
+struct HDF5File
+    filename::String
+    group::String
+end
+HDF5File(filename::String; group::String="") = HDF5File(filename, group)
+open_file(f::Function, h5file::HDF5File) = h5open(h5file.filename, "cw") do fid
+    if h5file.group != ""
+        f(create_group(fid, h5file.group))
+    else
+        f(fid)
+    end
+end
+open_file(f::Function, filename::String) = if endswith(lowercase(filename), r".h(df)?5")
+    open_file(f, HDF5File(filename))
+else
+    throw(ArgumentError("Unsupported file extension: $filename. HDF5 expected."))
+end
 open_file(f::Function, ::Nothing) = f(nothing)
-prepare_dataset(fid::HDF5.File, name::String, type, sz, n, batch) =
+prepare_dataset(fid::Union{HDF5.File,HDF5.Group}, name::String, type, sz, n, batch) =
     BufferedDataset(create_dataset(fid, name, type, (sz..., n), chunk=(sz..., batch)))
 prepare_dataset(::Nothing, ::String, ::Type{T}, sz, n, ::Int) where T =
     BufferedDataset(Array{T}(undef, (sz..., n)))
-function simulation_run(filename, phsbuffers, imgbuffers, true_sky_adapt, n;
+function simulation_run(file, phsbuffers, imgbuffers, true_sky_adapt, n;
             verbose=true, savephases::Bool=true)
-    open_file(filename) do fid
+    open_file(file) do fid
         batch = batch_length(phsbuffers)
         if imgbuffers !== nothing
             img_size = image_size(imgbuffers)
-            fid !== nothing && (fid["aperture"] = imgbuffers.spec.aperture)
             img_bd =
                 prepare_dataset(fid, "images", image_type(imgbuffers), img_size, n, batch)
         else
@@ -93,17 +108,17 @@ the results to an HDF5 file.
 # Keyword Arguments
 - `n`: number of phase screens to simulate.
 - `batch`: batch size for buffered computations and HDF5 writes (default 128).
-- `filename`: output HDF5 filename. If set to `nothing` (default), no file is written
+- `file`: output HDF5 file name. If set to `nothing` (default), no file is written
   and the phases are returned as an array.
 - `verbose`: show progress meter (true by default).
 - `deviceadapter`: adapter for device-backed arrays (defaults to `Array`). To use GPU arrays,
   pass e.g. `CUDA.CuArray` here (requires CUDA.jl).
 """
-function simulate_phases(atm_spec::AtmosphereSpec, plate_size; n::Int, batch::Int=DEFAULT_BATCH, filename=nothing,
+function simulate_phases(atm_spec::AtmosphereSpec, plate_size; n::Int, batch::Int=DEFAULT_BATCH, file=nothing,
         verbose=true, deviceadapter=Array)
     batch = min(batch, n)
     phase_buffers = prepare_phasebuffers(atm_spec, plate_size, batch, deviceadapter)
-    simulation_run(filename, phase_buffers, nothing, nothing, n; verbose=verbose)
+    simulation_run(file, phase_buffers, nothing, nothing, n; verbose=verbose)
 end
 
 """
@@ -123,7 +138,7 @@ the results to an HDF5 file.
 # Keyword Arguments
 - `n`: number of images to simulate.
 - `batch`: batch size for buffered computations and HDF5 writes (default 128).
-        - `filename`: output HDF5 filename. If set to `nothing` (default), no file is written
+- `file`: output HDF5 file name. If set to `nothing` (default), no file is written
   and the images and phases are returned as a `NamedTuple` of arrays.
 - `verbose`: show progress meter (true by default).
 - `savephases`: when true, the sampled phase screens are saved in the HDF5 in dataset with
@@ -132,7 +147,7 @@ the results to an HDF5 file.
   pass e.g. `CUDA.CuArray` here (requires CUDA.jl).
 """
 function simulate_images(::Type{T}, img_spec::ImagingSpec, atm_spec::AtmosphereSpec, true_sky::TrueSky=PointSource();
-    n::Int, batch::Int=DEFAULT_BATCH, filename=nothing, verbose=true, savephases::Bool=true, deviceadapter=Array) where {T}
+    n::Int, batch::Int=DEFAULT_BATCH, file=nothing, verbose=true, savephases::Bool=true, deviceadapter=Array) where {T}
     if !isfinite_photons(img_spec.photon_count) && T <: Integer
         throw(ArgumentError("Integer image eltype not compatible with infinite-photon imaging spec."))
     end
@@ -144,7 +159,7 @@ function simulate_images(::Type{T}, img_spec::ImagingSpec, atm_spec::AtmosphereS
     batch = min(batch, n)
     true_sky_adapt = adapt(deviceadapter, true_sky)
     phase_buffers, image_buffers = prepare_buffers(T, atm_spec, img_spec, batch, deviceadapter)
-    simulation_run(filename, phase_buffers, image_buffers, true_sky_adapt, n;
+    simulation_run(file, phase_buffers, image_buffers, true_sky_adapt, n;
         verbose=verbose, savephases=savephases)
 end
 simulate_images(img_spec::ImagingSpec{T}, phase_sampler::AtmosphereSpec, true_sky::TrueSky=PointSource(); kwargs...) where {T} =

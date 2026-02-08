@@ -46,7 +46,7 @@ You can generate and save phase screens to an HDF5 file using [`simulate_phases`
 
 ```@example phase_generation
 using Plots, HDF5
-simulate_phases(atm_harding; n=128, filename="phases.h5")
+simulate_phases(atm_harding; n=128, file="phases.h5")
 
 # Load and visualize a generated phase screen
 phases = h5read("phases.h5", "phases", (:, :, 1))
@@ -64,7 +64,7 @@ using AtmosphericTurbulenceSimulator
 
 # 64×64 grid, radius 30 pixels
 aperture = CircularAperture((64, 64), 30) 
-img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200), filter_spec=FilterSpec(550, bandwidth=40))
+img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200), filter=FilterSpec(550, bandwidth=40))
 nothing # hide
 ```
 
@@ -102,7 +102,7 @@ using Plots, HDF5, Statistics
 atm = SingleLayer((64, 64), 0.2 / 2 * 64, interpolate=:auto)
 
 # Simulate 128 images
-simulate_images(Int32, img_spec, atm, ts_point; n=128, filename="images.h5")
+simulate_images(Int32, img_spec, atm, ts_point; n=128, file="images.h5")
 
 # Load and visualize results
 images = h5read("images.h5", "images")
@@ -124,7 +124,7 @@ The output HDF5 file contains:
 Control batch size and HDF5 chunk size for better I/O performance:
 
 ```julia
-simulate_images(img_spec, atm, ts; n=10000, batch=256, filename="simulation.h5")
+simulate_images(img_spec, atm, ts; n=10000, batch=256, file="simulation.h5")
 ```
 The default batch size is 64 images; this is reasonable for most use cases, increase if you have sufficient RAM and run in more than 64 threads or on GPU.
 
@@ -139,7 +139,7 @@ You can also enable GPU acceleration by specifying a device adapter. For example
 ```julia
 using CUDA
 # Set up atmosphere, imaging spec, true sky as before
-simulate_images(img_spec, atm, ts; n=100_000, filename="simulation.h5", deviceadapter=CuArray)  # run on GPU
+simulate_images(img_spec, atm, ts; n=100_000, file="simulation.h5", deviceadapter=CuArray)  # run on GPU
 ```
 
 !!! warning

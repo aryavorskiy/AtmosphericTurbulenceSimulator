@@ -7,4 +7,4 @@ img_spec = ImagingSpec(aperture, PhotonCount(1e6, 1.0), img_size=(256, 256),
     filter=FilterSpec(1, bandwidth=0.1),
     exposure=Exposure(0.04, 100)
     )
-@time simulate_images(img_spec, atm, n=300, savephases=true, filename="simulation_mw2.h5");
+@time simulate_images(img_spec, atm, n=300, savephases=true, file="simulation_mw2.h5");
