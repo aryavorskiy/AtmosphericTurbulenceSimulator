@@ -113,5 +113,10 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
         @test length(img_buf3.offsets) == 10
         @test img_buf3.offsets[1].can_ff
         @test !img_buf3.offsets[2].can_ff
+
+        img_spec3 = ImagingSpec(ap; nphotons=1e6, background=100, exposure=Exposure(0, 10))
+        img_buf4 = prepare_buffers(Int32, atm2, img_spec3, 5, identity)[2]
+        @test length(img_buf4.offsets) == 1
+        @test img_buf4.offsets[1].can_ff
     end
 end
