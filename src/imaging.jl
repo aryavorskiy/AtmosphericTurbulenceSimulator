@@ -157,7 +157,7 @@ struct TrueSkyImage{MT<:AbstractMatrix{<:Complex}} <: TrueSky
     true_sky_fft::MT
 end
 function TrueSkyImage(true_sky::AbstractMatrix{T}) where {T<:Real}
-    true_sky_fft = ifft(ifftshift(true_sky))
+    true_sky_fft = fft(ifftshift(true_sky))
     true_sky_fft ./= true_sky_fft[1, 1]  # normalize DC component to 1
     return TrueSkyImage{typeof(true_sky_fft)}(true_sky_fft)
 end
