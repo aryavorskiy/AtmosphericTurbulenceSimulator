@@ -97,7 +97,7 @@ using Plots, HDF5, Statistics
 atm = SingleLayer(0.2 / 2 * 64, interpolate=:auto)
 
 # Simulate 128 images
-simulate_images(Int32, img_spec, atm, ts_point; n=128, file="images.h5")
+simulate_images(Int32, ts_point, atm, img_spec; n=128, file="images.h5")
 
 # Load and visualize results
 images = h5read("images.h5", "images")
@@ -116,10 +116,10 @@ You can specify more saving options by passing an [`HDF5File`](@ref) object inst
 Let us consider another example with a true sky image:
 
 ```@example psf_simulation
-images = simulate_images(img_spec, atm, ts_image; n=128, savephases=false).images
-p1 = heatmap(img, title="True Sky", colormap=:jet, aspect_ratio=:equal)
-p2 = heatmap(images[:, :, 1], title="Single Frame", colormap=:jet, aspect_ratio=:equal)
-p3 = heatmap(mean(images, dims=3)[:,:,1], title="128 Frame Average", colormap=:jet, aspect_ratio=:equal)
+images = simulate_images(ts_image, atm, img_spec; n=128, savephases=false).images
+p1 = heatmap(img, title="True Sky", colormap=:jet, aspect_ratio=:equal, cbar=false)
+p2 = heatmap(images[:, :, 1], title="Single Frame", colormap=:jet, aspect_ratio=:equal, cbar=false)
+p3 = heatmap(mean(images, dims=3)[:,:,1], title="128 Frame Average", colormap=:jet, aspect_ratio=:equal, cbar=false)
 plot(p1, p2, p3, layout=(1, 3), size=(1200, 450))
 ```
 
@@ -130,7 +130,7 @@ plot(p1, p2, p3, layout=(1, 3), size=(1200, 450))
 Control batch size and HDF5 chunk size for better I/O performance:
 
 ```julia
-simulate_images(img_spec, atm, ts; n=10000, batch=256, file="simulation.h5")
+simulate_images(ts, atm, img_spec; n=10000, batch=256, file="simulation.h5")
 ```
 The default batch size is 128 images; this is reasonable for most use cases, increase if you have sufficient RAM and run in more than 64 threads or on GPU, decrease if you run out of memory. Note that chunk size in the HDF5 file is set to match the batch size.
 
@@ -145,7 +145,7 @@ You can also enable GPU acceleration by specifying a device adapter. For example
 ```julia
 using CUDA
 # Set up atmosphere, imaging spec, true sky as before
-simulate_images(img_spec, atm, ts; n=100_000, file="simulation.h5", deviceadapter=CuArray)  # run on GPU
+simulate_images(ts, atm, img_spec; n=100_000, file="simulation.h5", deviceadapter=CuArray)  # run on GPU
 ```
 
 !!! warning

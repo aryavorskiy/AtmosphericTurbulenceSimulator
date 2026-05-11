@@ -12,7 +12,7 @@
         img_spec3 = ImagingSpec(ap, pc, filter=FilterSpec(1, bandwidth=0.1, tedge=0.5), exposure=Exposure(3, 5))
 
         for (ts, is) in zip((ts1, ts2, ts3), (img_spec, img_spec2, img_spec3))
-            res = simulate_images(Int32, is, atm, ts; n=16, file=nothing, verbose=false)
+            res = simulate_images(Int32, ts, atm, is; n=16, file=nothing, verbose=false)
             @test res isa NamedTuple
             @test keys(res) == (:phases, :images)
             images = res.images
@@ -29,23 +29,23 @@
             @test eltype(images) == Int32
         end
 
-        @test_throws ArgumentError simulate_images(img_spec, atm, TrueSkyImage(rand(16, 16)); n=16)
+        @test_throws ArgumentError simulate_images(TrueSkyImage(rand(16, 16)), atm, img_spec; n=16)
     end
 
     @testset "Continuous vs Poisson" begin
         # Continuous flux
         img_spec_cont = ImagingSpec(ap; nphotons=Inf)
         ts_cont = PointSource()
-        @test_throws ArgumentError simulate_images(Int32, img_spec_cont, atm, ts_cont; n=16)
+        @test_throws ArgumentError simulate_images(Int32, ts_cont, atm, img_spec_cont; n=16)
 
-        images_cont = simulate_images(img_spec_cont, atm, ts_cont; n=16, file=nothing, verbose=false, deviceadapter=identity).images
+        images_cont = simulate_images(ts_cont, atm, img_spec_cont; n=16, file=nothing, verbose=false, deviceadapter=identity).images
         @test eltype(images_cont) == Float64
         @test all(>=(-eps()), images_cont)
 
         # Poisson sampling
         img_spec_poisson = ImagingSpec(ap; nphotons=1e6, background=100)
         ts_poisson = PointSource()
-        images_poisson = simulate_images(img_spec_poisson, atm, ts_poisson; n=16, file=nothing, verbose=false, deviceadapter=identity).images
+        images_poisson = simulate_images(ts_poisson, atm, img_spec_poisson; n=16, file=nothing, verbose=false, deviceadapter=identity).images
 
         @test eltype(images_poisson) == Int64
         @test all(>=(0), images_poisson)
@@ -56,7 +56,7 @@
         img_spec_float = ImagingSpec(ap; nphotons=Inf)
 
         tmpfile = tempname() * ".h5"
-        simulate_images(Float32, img_spec_float, atm, ts; n=16, file=tmpfile, savephases=false,
+        simulate_images(Float32, ts, atm, img_spec_float; n=16, file=tmpfile, savephases=false,
             verbose=false)
 
         h5open(tmpfile, "r") do fid

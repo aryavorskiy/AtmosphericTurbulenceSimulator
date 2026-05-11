@@ -62,7 +62,7 @@ ts_double = DoubleSystem((5, 3), 0.5)
 # ts_image = TrueSkyImage(my_image_array)
 
 # Simulate images and save to HDF5 (includes phase screens by default)
-simulate_images(img_spec, atm, ts_point; n=3000, filename="simulation.h5")
+simulate_images(ts_point, atm, img_spec; n=3000, filename="simulation.h5")
 ```
 
 This will create a HDF5 file `simulation.h5` containing 3000 simulated images of the point source
