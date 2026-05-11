@@ -5,10 +5,7 @@
 [![codecov](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator.jl)
 [![JET](https://img.shields.io/badge/JET.jl-tested-green.svg)](https://github.com/aviatesk/JET.jl)
 
-A simple (yet) Julia toolchain to simulate atmospheric turbulence effects on imaging systems. It provides
-utilities to define different telescope apertures and true sky models; the phase screens are generated
-using common statistical models of atmospheric turbulence. The output is written into a HDF5 file
-containing the simulated images and optionally the phase screens used to generate them.
+A simple (yet) Julia toolchain to simulate atmospheric turbulence effects on imaging systems.
 
 ## Installation
 
@@ -29,22 +26,12 @@ You can generate phase screens with or without Harding interpolation:
 ```julia
 using AtmosphericTurbulenceSimulator
 
-# Without Harding interpolation: generates 64×64 phase screens directly
-# r0 = 0.2 m, assuming a 2 m telescope aperture diameter
-atm_basic = SingleLayer((64, 64), 0.2 / 2 * 64)
-
 # With Harding interpolation: samples at low resolution, then upsamples
 # Using :auto to determine optimal number of interpolation passes
-atm_harding = SingleLayer((256, 256), 0.2 / 2 * 256; interpolate=:auto)
-
-# Alternative: specify number of interpolation passes explicitly
-atm_2pass = SingleLayer((256, 256), 0.2 / 2 * 256; interpolate=2)
-
-# Or specify the low-resolution grid size directly
-atm_from = SingleLayer((256, 256), 0.2 / 2 * 256; interpolate_from=(32, 32))
+atm = SingleLayer(0.2 / 2 * 64; interpolate=:auto)
 
 # Generate phase screens and save to HDF5
-simulate_phases(atm_harding; n=3000, filename="phases.h5")
+simulate_phases(atm, (64, 64); n=3000, filename="phases.h5")
 ```
 
 The Harding interpolation (from [Harding et al. 1999](https://doi.org/10.1364/AO.38.002161))
@@ -59,10 +46,10 @@ specification and a true-sky model:
 ```julia
 # Define circular aperture and imaging parameters
 ap = CircularAperture((64, 64), 25)
-img_spec = ImagingSpec(ap, nphotons=1e6, background=100)
+img_spec = ImagingSpec(ap, PhotonCount(1e6, 100))
 
 # Atmosphere specification
-atm = SingleLayer((64, 64), 0.2 / 2 * 64, interpolate=:auto)
+atm = SingleLayer(0.2 / 2 * 64, interpolate=:auto)
 
 # True sky models:
 # Point source

@@ -96,7 +96,7 @@ function simulation_run(file, phsbuffers, imgbuffers, true_sky_adapt, n;
 end
 
 """
-    simulate_phases(atm_spec::AtmosphereSpec, plate_size; n, [batch, filename, verbose, deviceadapter])
+    simulate_phases(atm_spec::AtmosphereSpec, plate_size; n, [batch, file, verbose, deviceadapter])
 
 Simulate `n` phase screens using the provided atmosphere specification and write
 the results to an HDF5 file.
@@ -108,8 +108,8 @@ the results to an HDF5 file.
 # Keyword Arguments
 - `n`: number of phase screens to simulate.
 - `batch`: batch size for buffered computations and HDF5 writes (default 128).
-- `file`: output HDF5 file name. If set to `nothing` (default), no file is written
-  and the phases are returned as an array.
+- `file`: output options. Can be a string (filename) or an `HDF5File` object. If set to `nothing`
+    (default), no file is written and the phases are returned as an array.
 - `verbose`: show progress meter (true by default).
 - `deviceadapter`: adapter for device-backed arrays (defaults to `Array`). To use GPU arrays,
   pass e.g. `CUDA.CuArray` here (requires CUDA.jl).
@@ -123,7 +123,7 @@ end
 
 """
     simulate_images([T, ]img_spec::ImagingSpec, atm_spec::AtmosphereSpec[, true_sky::TrueSky]; \
-        n, [batch, filename, verbose, savephases, deviceadapter])
+        n, [batch, file, verbose, savephases, deviceadapter])
 
 Simulate `n` images using the provided imaging and atmosphere specifications and write
 the results to an HDF5 file.
@@ -138,8 +138,8 @@ the results to an HDF5 file.
 # Keyword Arguments
 - `n`: number of images to simulate.
 - `batch`: batch size for buffered computations and HDF5 writes (default 128).
-- `file`: output HDF5 file name. If set to `nothing` (default), no file is written
-  and the images and phases are returned as a `NamedTuple` of arrays.
+- `file`: output options. Can be a string (filename) or an `HDF5File` object. If set to `nothing`
+    (default), no file is written and the images and phases are returned as a `NamedTuple` of arrays.
 - `verbose`: show progress meter (true by default).
 - `savephases`: when true, the sampled phase screens are saved in the HDF5 in dataset with
   key `"phases"`, and the pupil function is saved under key `"aperture"` (true by default).

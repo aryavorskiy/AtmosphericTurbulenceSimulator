@@ -34,23 +34,18 @@ Thus, a single turbulent layer is specified by the grid size and the dimensionle
 
 ```@example phase_generation
 using AtmosphericTurbulenceSimulator
-# Assume a 2 m telescope, r0 = 0.2 m, grid size 64×64
-atm = SingleLayer((64, 64), 0.2 / 2 * 64)
-# Using interpolation for 256×256 grid
-atm_harding = SingleLayer((256, 256), 0.2 / 2 * 256; interpolate=:auto)
+# Assume a 2 m telescope, grid size 64×64, r0 = 0.2 m = 0.2 / 2 * 64 pixels
+atm = SingleLayer(0.2 / 2 * 64; interpolate=:auto)
 ```
 
-Normally the phases are generated using Karhunen-Loève expansion by sampling from a multivariate normal distribution with the appropriate covariance matrix. Since this can be compute-intensive for grids larger than ~32×32, it is recommended to use Harding interpolation (see [Harding et al. 1999](https://doi.org/10.1364/AO.38.002161)) for high-resolution screens. One interpolation pass increases the grid size as ``N \to 2N - 11``, so multiple passes can be used to reach very high resolutions efficiently. See the [`SingleLayer`](@ref) documentation for details on interpolation options.
+Normally the phases are generated using Karhunen-Loève expansion by sampling from a multivariate normal distribution with the appropriate covariance matrix. Since this can be compute-intensive for grids larger than ~32×32, another way to sample turbulent phase screens is interpolating a lower-resolution version (see [Harding et al. 1999](https://doi.org/10.1364/AO.38.002161)). One interpolation pass increases the grid size as ``N \to 2N - 11``, so multiple passes can be used to reach very high resolutions efficiently. See the [`SingleLayer`](@ref) documentation for details on interpolation options.
 
-You can generate and save phase screens to an HDF5 file using [`simulate_phases`](@ref):
+You can generate phase screens by passing the desired plate size to [`simulate_phases`](@ref):
 
 ```@example phase_generation
 using Plots, HDF5
-simulate_phases(atm_harding; n=128, file="phases.h5")
-
-# Load and visualize a generated phase screen
-phases = h5read("phases.h5", "phases", (:, :, 1))
-heatmap(phases, colorbar=true, colormap=:viridis, aspect_ratio=:equal, title="Turbulent Phase Screen", size=(500, 450))
+phases = simulate_phases(atm, (64, 64); n=1)
+heatmap(phases[:, :, 1], colorbar=true, colormap=:viridis, aspect_ratio=:equal, title="Turbulent Phase Screen", size=(500, 450))
 ```
 
 ### PSF simulation
@@ -98,8 +93,8 @@ Finally, combine everything with [`simulate_images`](@ref) to generate a sequenc
 ```@example psf_simulation
 using Plots, HDF5, Statistics
 
-# Atmosphere with same grid as aperture
-atm = SingleLayer((64, 64), 0.2 / 2 * 64, interpolate=:auto)
+# Atmosphere
+atm = SingleLayer(0.2 / 2 * 64, interpolate=:auto)
 
 # Simulate 128 images
 simulate_images(Int32, img_spec, atm, ts_point; n=128, file="images.h5")
@@ -114,8 +109,19 @@ plot(p1, p2, layout=(1, 2), size=(900, 450))
 
 The output HDF5 file contains:
 - `"images"`: simulated images ``(N_x, N_y, n)``
-- `"aperture"`: the aperture function ``(N_x, N_y)``
 - `"phases"`: phase screens ``(Np_x, Np_y, n)`` (if `savephases=true`, true by default)
+
+You can specify more saving options by passing an [`HDF5File`](@ref) object instead of the filename. This allows you to control group structure, file open mode, and other HDF5 parameters. Also you can omit file output entirely and return the results as a `NamedTuple` of arrays by setting `file=nothing` (which is the default).
+
+Let us consider another example with a true sky image:
+
+```@example psf_simulation
+images = simulate_images(img_spec, atm, ts_image; n=128, savephases=false).images
+p1 = heatmap(img, title="True Sky", colormap=:jet, aspect_ratio=:equal)
+p2 = heatmap(images[:, :, 1], title="Single Frame", colormap=:jet, aspect_ratio=:equal)
+p3 = heatmap(mean(images, dims=3)[:,:,1], title="128 Frame Average", colormap=:jet, aspect_ratio=:equal)
+plot(p1, p2, p3, layout=(1, 3), size=(1200, 450))
+```
 
 ## Advanced options
 
@@ -126,7 +132,7 @@ Control batch size and HDF5 chunk size for better I/O performance:
 ```julia
 simulate_images(img_spec, atm, ts; n=10000, batch=256, file="simulation.h5")
 ```
-The default batch size is 64 images; this is reasonable for most use cases, increase if you have sufficient RAM and run in more than 64 threads or on GPU.
+The default batch size is 128 images; this is reasonable for most use cases, increase if you have sufficient RAM and run in more than 64 threads or on GPU, decrease if you run out of memory. Note that chunk size in the HDF5 file is set to match the batch size.
 
 ### Multi-threading and GPU acceleration
 

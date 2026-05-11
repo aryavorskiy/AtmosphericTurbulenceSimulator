@@ -202,7 +202,7 @@ Create an imaging system specification.
 """
 function ImagingSpec(aperture::AbstractMatrix{T}, photon_count::PhotonCount;
     filter::FilterSpec=MonoFilterSpec(), nyquist_oversample::Real=1,
-    exposure=0,
+    exposure::Union{Exposure,Number}=0,
     img_size::NTuple{2,Int}=round.(Int, size(aperture) .* 2 .* nyquist_oversample)) where T<:Real
     fs = convert(FilterSpec{T}, filter)
     pc = convert(PhotonCount{T}, photon_count)
