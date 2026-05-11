@@ -42,13 +42,31 @@ end
 struct HDF5File
     filename::String
     group::String
+    overwrite::Bool
 end
-HDF5File(filename::String; group::String="") = HDF5File(filename, group)
-open_file(f::Function, h5file::HDF5File) = h5open(h5file.filename, "cw") do fid
-    if h5file.group != ""
-        f(create_group(fid, h5file.group))
-    else
-        f(fid)
+
+"""
+    HDF5File(filename[; group="", overwrite=false])
+
+A convenience struct for specifying HDF5 output options.
+
+# Arguments
+- `filename`: name of the HDF5 file to write to.
+- `group`: optional group within the HDF5 file to write datasets to (default: root group).
+- `overwrite`: if `true`, overwrite the group if it already exists (or the entire file if `group=""`),
+    otherwise throw an error if datasets with the same name already exist (default: `false`).
+"""
+HDF5File(filename::String; group::String="", overwrite::Bool=false) = HDF5File(filename, group, overwrite)
+function open_file(f::Function, h5file::HDF5File)
+    overwrite == "group" && group = "" &&
+        throw(ArgumentError("Group overwrite option requires a non-empty group name."))
+    h5open(h5file.filename, overwrite && group = "" ? "w" : "cw") do fid
+        if h5file.group != ""
+            h5file.overwrite && haskey(fid, h5file.group) && HDF5.delete_object(fid[h5file.group])
+            f(create_group(fid, h5file.group))
+        else
+            f(fid)
+        end
     end
 end
 open_file(f::Function, filename::String) = if endswith(lowercase(filename), r".h(df)?5")
