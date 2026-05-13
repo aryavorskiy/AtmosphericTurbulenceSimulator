@@ -31,7 +31,7 @@ using AtmosphericTurbulenceSimulator
 atm = SingleLayer(0.2 / 2 * 64; interpolate=:auto)
 
 # Generate phase screens and save to HDF5
-simulate_phases(atm, (64, 64); n=3000, filename="phases.h5")
+simulate_phases(atm, (64, 64); n=3000, file="phases.h5")
 ```
 
 The Harding interpolation (from [Harding et al. 1999](https://doi.org/10.1364/AO.38.002161))
@@ -55,14 +55,14 @@ atm = SingleLayer(0.2 / 2 * 64, interpolate=:auto)
 # Point source
 ts_point = PointSource()
 
-# Binary system: secondary offset by (5, 3) pixels with 0.5× intensity
-ts_double = DoubleSystem((5, 3), 0.5)
+# Binary system: secondary offset by (35, 15) pixels with 0.3× intensity
+ts_double = DoubleSystem((35, 15), 0.3)
 
 # Custom image from array
 # ts_image = TrueSkyImage(my_image_array)
 
 # Simulate images and save to HDF5 (includes phase screens by default)
-simulate_images(ts_point, atm, img_spec; n=3000, filename="simulation.h5")
+simulate_images(ts_point, atm, img_spec; n=3000, file="simulation.h5")
 ```
 
 This will create a HDF5 file `simulation.h5` containing 3000 simulated images of the point source
@@ -104,7 +104,7 @@ Please note that this package is in early development. There are multiple featur
     - [ ] Frozen flow
     - [ ] Multi-layer atmospheres
     - [ ] Fresnel propagation
-- [x] Multi-wavelength imaging
+- [ ] Multi-wavelength imaging
 - [ ] Coronagraph models
 - [ ] Wavefront sensor simulation (?)
 - [ ] FITS support (?)
