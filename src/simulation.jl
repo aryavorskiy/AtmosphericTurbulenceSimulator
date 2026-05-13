@@ -147,9 +147,9 @@ the results to an HDF5 file.
 # Arguments
 - `T`: output image numeric type; if not provided, defaults to `Int` for finite-photon
     simulations (determined by `img_spec.photon_count.nphotons`) and `Float64` for infinite-photon models.
-- `img_spec`: an `ImagingSpec` describing the aperture, image size, photon budget and filter.
-- `atm_spec`: an `AtmosphereSpec` used to produce phase screens.
 - `true_sky`: a `TrueSky` model (e.g. `PointSource`, `DoubleSystem`, `TrueSkyImage`).
+- `atm_spec`: an `AtmosphereSpec` used to produce phase screens.
+- `img_spec`: an `ImagingSpec` describing the aperture, image size, photon budget and filter.
 
 # Keyword Arguments
 - `n`: number of images to simulate.

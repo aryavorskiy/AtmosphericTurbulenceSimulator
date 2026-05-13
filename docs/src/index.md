@@ -69,7 +69,7 @@ The Fried parameter ``r_0`` controls turbulence strength. Larger ``r_0`` means w
 aberrations. In this package, pass ``r_0`` in pixels on the phase-screen grid.
 
 For large grids, [`SingleLayer`](@ref) can use Harding interpolation ([Harding et al. 1999](https://doi.org/10.1364/AO.38.002161)). 
-The phase is sampled on asmaller grid and then upsampled in a way that preserves Kolmogorov statistics. `interpolate=:auto`
+The phase is sampled on a smaller grid and then upsampled in a way that preserves Kolmogorov statistics. `interpolate=:auto`
 selects a coarse grid size based on the default heuristic.
 
 ## Imaging Model

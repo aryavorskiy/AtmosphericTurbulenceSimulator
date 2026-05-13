@@ -121,11 +121,18 @@ The exposure is simulated by averaging `nsteps` short exposures with appropriate
 
 # Arguments
 - `exptime`: total exposure time. Shares the same time units as the wind velocity in the atmosphere specification.
-- `nsteps`: number of steps to simulate for long exposures (default 5). Set to 1 for a single long exposure.
+- `nsteps`: number of steps to simulate for long exposures (default 5).
 - `round_offsets`: whether to round the exposure offsets to integers (default false). When true,
   the phase screens are sampled at integer pixel offsets, which can reduce interpolation artifacts.
 """
-Exposure(exptime, nsteps=5; round_offsets=false) = Exposure(exptime, nsteps, round_offsets)
+function Exposure(exptime, nsteps=5; round_offsets=false)
+    nsteps == 1 && !iszero(exptime) &&
+        @warn "Ignoring non-zero exposure time for single-step exposure."
+    if iszero(exptime)
+        nsteps = 1
+    end
+    Exposure(exptime, nsteps, round_offsets)
+end
 
 abstract type TrueSky end
 

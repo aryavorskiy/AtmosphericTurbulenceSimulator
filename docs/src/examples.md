@@ -17,6 +17,7 @@ Create a [`SingleLayer`](@ref) atmosphere by specifying the Fried parameter ``r_
 using AtmosphericTurbulenceSimulator
 
 atm = SingleLayer(0.2 / 2 * 64; interpolate=:auto)
+nothing # hide
 ```
 
 Generate phase screens by passing the atmosphere model and desired plate size to [`simulate_phases`](@ref):
@@ -55,7 +56,6 @@ img_spec = ImagingSpec(
     filter=FilterSpec(550, bandwidth=40),
 )
 atm = SingleLayer(0.2 / 2 * 64; interpolate=:auto)
-sky = PointSource()
 nothing # hide
 ```
 
@@ -64,7 +64,7 @@ Run the simulation in memory by leaving `file=nothing`, which is the default:
 ```@example point_source_imaging
 using Plots, Statistics
 
-result = simulate_images(sky, atm, img_spec; n=128, savephases=false, verbose=false)
+result = simulate_images(atm, img_spec; n=128, savephases=false, verbose=false)
 images = result.images
 
 p1 = heatmap(images[:, :, 1], title="Single Frame", cmap=:jet, aspect_ratio=:equal)
@@ -152,7 +152,9 @@ atm2 = SingleLayer(0.4 / 2 * 64; interpolate=:auto)
 simulate_images(atm1, img_spec; n=16, verbose=false, file=HDF5File("images.h5", group="bad_seeing"))
 simulate_images(atm2, img_spec; n=16, verbose=false, file=HDF5File("images.h5", group="good_seeing"))
 
-h5open("images.h5", "r")    # display the file structure
+h5open("images.h5", "r") do h5  # display the file structure
+    show(stdout, "text/plain", h5)
+end
 ```
 
 We wrote two simulation runs to the same file under different groups. Each group contains two datasets:
