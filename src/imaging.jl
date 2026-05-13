@@ -113,7 +113,20 @@ struct Exposure
     nsteps::Int
     round_offsets::Bool
 end
+"""
+    Exposure(exptime[, nsteps][; round_offsets])
+
+A struct that encapsulates the exposure time and related parameters for long-exposure simulations.
+The exposure is simulated by averaging `nsteps` short exposures with appropriate offsets of the wavefront.
+
+# Arguments
+- `exptime`: total exposure time. Shares the same time units as the wind velocity in the atmosphere specification.
+- `nsteps`: number of steps to simulate for long exposures (default 5). Set to 1 for a single long exposure.
+- `round_offsets`: whether to round the exposure offsets to integers (default false). When true,
+  the phase screens are sampled at integer pixel offsets, which can reduce interpolation artifacts.
+"""
 Exposure(exptime, nsteps=5; round_offsets=false) = Exposure(exptime, nsteps, round_offsets)
+
 abstract type TrueSky end
 
 """
@@ -193,6 +206,8 @@ Create an imaging system specification.
 # Keyword Arguments
 - `filter`: `FilterSpec` describing sampled wavelengths and their relative intensities.
   Defaults to a monochromatic filter.
+- `exposure`: a number or an [`Exposure`](@ref) instance describing the exposure time and number of
+  steps for long exposures. Defaults to zero exposure time (i.e. short exposure).
 - `nyquist_oversample`: multiplicative factor applied to the default Nyquist image size (`2 * size(aperture)`).
   Defaults to 1. Ignored if `img_size` is provided.
 - `img_size`: explicit output image size `(nx, ny)`. If not provided, computed from aperture size

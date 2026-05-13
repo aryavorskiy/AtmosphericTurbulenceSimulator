@@ -1,6 +1,8 @@
 using Documenter
 using AtmosphericTurbulenceSimulator
 
+ENV["GKSwstype"] = "100"
+
 DocMeta.setdocmeta!(AtmosphericTurbulenceSimulator, :DocTestSetup, :(using AtmosphericTurbulenceSimulator); recursive=true)
 
 makedocs(
@@ -11,6 +13,7 @@ makedocs(
     ),
     pages = [
         "Overview" => "index.md",
+        "Examples" => "examples.md",
         "API Reference" => "api.md",
     ],
 )

@@ -157,8 +157,8 @@ the results to an HDF5 file.
 - `file`: output options. Can be a string (filename) or an `HDF5File` object. If set to `nothing`
     (default), no file is written and the images and phases are returned as a `NamedTuple` of arrays.
 - `verbose`: show progress meter (true by default).
-- `savephases`: when true, the sampled phase screens are saved in the HDF5 in dataset with
-  key `"phases"`, and the pupil function is saved under key `"aperture"` (true by default).
+- `savephases`: when true (default), the sampled phase screens are saved in the HDF5 in dataset with
+  key `"phases"`.
 - `deviceadapter`: adapter for device-backed arrays (defaults to `Array`). To use GPU arrays,
   pass e.g. `CUDA.CuArray` here (requires CUDA.jl).
 """

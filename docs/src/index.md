@@ -1,159 +1,122 @@
-# Tutorial
+# Overview
 
-AtmosphericTurbulenceSimulator provides a Julia toolchain to simulate atmospheric turbulence effects on imaging systems. The package:
+AtmosphericTurbulenceSimulator.jl simulates atmospheric turbulence effects in telescope imaging.
+It provides tools for sampling turbulent phase screens, propagating them through a pupil model, and
+generating image sequences for point sources, binary systems, and extended sky images.
 
-- Generates turbulent phase screens following the Kolmogorov model
-- Supports efficient high-resolution generation via Harding interpolation
-- Simulates telescope imaging with various aperture functions
-- Models different true-sky brightness distributions (point sources, binaries, extended objects)
-- Outputs results to HDF5 format for analysis
-- Supports CPU multi-threading and GPU acceleration (CUDA, etc.)
+The package is designed for simulation runs that need:
+
+- Kolmogorov phase screens parameterized by the Fried parameter ``r_0``.
+- Harding interpolation for efficient high-resolution phase generation (see [Harding et al. 1999](https://doi.org/10.1364/AO.38.002161)).
+- Circular or user-defined aperture functions.
+- Monochromatic or sampled-bandpass imaging.
+- Photon-counting readout with optional background.
+- HDF5 output for large batches, or in-memory arrays for interactive work.
+- CPU multi-threading and device-backed arrays such as CUDA arrays.
 
 ## Installation
 
-This package is not registered yet. You can install it with the following command in Julia's REPL:
+The package is not registered yet. Install it from the Julia REPL with:
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator")
+Pkg.add(url="https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl")
 ```
 
-## Basic usage
+## Core Workflow
 
-### Phase screen generation
+A simulation combines three pieces:
 
-The atmosphere is modeled as a single turbulent layer with phase screens generated according to Kolmogorov statistics:
+1. A true-sky model, such as [`PointSource`](@ref), [`DoubleSystem`](@ref), or [`TrueSkyImage`](@ref). 
+   If none is provided, a point source is assumed.
+2. An atmosphere model, such as [`SingleLayer`](@ref), which samples turbulent phase screens.
+3. An imaging device specification, [`ImagingSpec`](@ref), which defines the aperture, detector grid,
+   photon budget, exposure, and filter.
+
+The main entry point is [`simulate_images`](@ref), which takes these pieces and produces a sequence of
+images.
+
+```@example quick_start
+using AtmosphericTurbulenceSimulator, Plots
+
+aperture = CircularAperture((64, 64), 30)
+img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200); filter=FilterSpec(550, bandwidth=40))
+atm = SingleLayer(0.1 / 2 * 64; interpolate=:auto)
+
+result = simulate_images(atm, img_spec; n=8, verbose=false)
+
+p = plot(layout=(2, 4), size=(1600, 800))
+for i in 1:8
+    heatmap!(p[i], result.images[:, :, i], cmap=:jet, cbar=false, clim=extrema(result.images), aspect_ratio=:equal)
+end
+p
+```
+
+For larger simulations, specify the `file` keyword argument to write results directly to disk. 
+See the [Examples](@ref) section for more info.
+
+## Atmosphere Model
+
+The current atmosphere model is a single turbulent layer. Phase covariance follows Kolmogorov
+statistics:
 
 ```math
-D_\phi(r) = \big\langle (\phi(x) - \phi(x+r))^2 \big\rangle = 6.88 \left( \frac{r}{r_0} \right)^{5/3}.
+D_\phi(r) = \big\langle (\phi(x) - \phi(x+r))^2 \big\rangle
+          = 6.88 \left( \frac{r}{r_0} \right)^{5/3}.
 ```
 
-Here the Fried parameter ``r_0`` (see [Fried 1965](https://doi.org/10.1364/JOSA.55.001427)) controls the turbulence strength. Typically, ``r_0`` takes values from a few centimeters to tens of centimeters, depending on atmospheric conditions and wavelength; larger ``r_0`` means weaker aberrations.
+The Fried parameter ``r_0`` controls turbulence strength. Larger ``r_0`` means weaker phase
+aberrations. In this package, pass ``r_0`` in pixels on the phase-screen grid.
 
-Thus, a single turbulent layer is specified by the grid size and the dimensionless Fried parameter in pixels. Use the [`SingleLayer`](@ref) constructor:
+For large grids, [`SingleLayer`](@ref) can use Harding interpolation ([Harding et al. 1999](https://doi.org/10.1364/AO.38.002161)). 
+The phase is sampled on asmaller grid and then upsampled in a way that preserves Kolmogorov statistics. `interpolate=:auto`
+selects a coarse grid size based on the default heuristic.
 
-```@example phase_generation
-using AtmosphericTurbulenceSimulator
-# Assume a 2 m telescope, grid size 64×64, r0 = 0.2 m = 0.2 / 2 * 64 pixels
-atm = SingleLayer(0.2 / 2 * 64; interpolate=:auto)
-```
+## Imaging Model
 
-Normally the phases are generated using Karhunen-Loève expansion by sampling from a multivariate normal distribution with the appropriate covariance matrix. Since this can be compute-intensive for grids larger than ~32×32, another way to sample turbulent phase screens is interpolating a lower-resolution version (see [Harding et al. 1999](https://doi.org/10.1364/AO.38.002161)). One interpolation pass increases the grid size as ``N \to 2N - 11``, so multiple passes can be used to reach very high resolutions efficiently. See the [`SingleLayer`](@ref) documentation for details on interpolation options.
-
-You can generate phase screens by passing the desired plate size to [`simulate_phases`](@ref):
-
-```@example phase_generation
-using Plots, HDF5
-phases = simulate_phases(atm, (64, 64); n=1)
-heatmap(phases[:, :, 1], colorbar=true, colormap=:viridis, aspect_ratio=:equal, title="Turbulent Phase Screen", size=(500, 450))
-```
-
-### PSF simulation
-
-To simulate images, you need to specify the imaging system (aperture, detector) and the true sky brightness distribution. The imaging pipeline convolves the PSF (computed from turbulent phase screens) with the true sky model, optionally adding photon shot noise.
-
-The aperture function defines the telescope pupil. For a circular aperture with radius ``R`` on an ``N\times N`` grid:
-
-```@example psf_simulation
-using AtmosphericTurbulenceSimulator
-
-# 64×64 grid, radius 30 pixels
-aperture = CircularAperture((64, 64), 30) 
-img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200), filter=FilterSpec(550, bandwidth=40))
-nothing # hide
-```
-
-The [`ImagingSpec`](@ref) combines the aperture with detector parameters. The [`PhotonCount`](@ref) is used to define the photon budget, while the [`FilterSpec`](@ref) is used to define wavelength and bandpass. You can also specify the photon budget with the `nphotons` and `background` keywords.
-
-Note that the Nyquist oversampling affects the PSF size, so it does not match the aperture grid size directly. You can specify the imaging grid size explicitly by passing it as a positional argument to [`ImagingSpec`](@ref).
+The imaging pipeline converts each phase screen into a PSF, applies the selected
+true-sky model, and optionally applies photon shot noise. A non-monochromatic [`FilterSpec`](@ref)
+scales both turbulence strength and diffraction with wavelength, while assuming that the aperture
+itself is achromatic.
 
 !!! note
-    The non-monochromatic PSF simulation assumes the telescope itself is achromatic, i.e., the aperture function does not depend on wavelength. The wavelength dependence only enters through the Fried parameter ``r_0(\lambda) \propto \lambda^{6/5}`` and the diffraction limit ``\lambda / D``. This is a good approximation only for narrow bands.
+    The sampled-bandpass model is most appropriate for narrow bands where the telescope pupil does
+    not vary significantly with wavelength.
 
-For the true sky, use [`PointSource`](@ref) for a single point source, [`DoubleSystem`](@ref) for a binary, or [`TrueSkyImage`](@ref) for arbitrary extended objects:
+## Performance
 
-```@example psf_simulation
-# Point source
-ts_point = PointSource()
-# Binary system
-ts_double = DoubleSystem((5, 3), 0.5)
-# Custom image from array
-img = zeros(Float32, 128, 128)
-img[65, 65] = 1.0  # single bright pixel at center
-for _ in 1:5
-    # random companions around the center
-    img[65 + rand(-32:32), 65 + rand(-32:32)] += rand() * 0.1 + 0.05
-end
-ts_image = TrueSkyImage(img)
-nothing # hide
-```
+### Backends
 
-Finally, combine everything with [`simulate_images`](@ref) to generate a sequence of turbulence-degraded images:
+Julia multi-threading can improve large CPU simulations:
 
-```@example psf_simulation
-using Plots, HDF5, Statistics
-
-# Atmosphere
-atm = SingleLayer(0.2 / 2 * 64, interpolate=:auto)
-
-# Simulate 128 images
-simulate_images(Int32, ts_point, atm, img_spec; n=128, file="images.h5")
-
-# Load and visualize results
-images = h5read("images.h5", "images")
-
-p1 = heatmap(images[:, :, 1], title="Single Frame", colormap=:jet, aspect_ratio=:equal)
-p2 = heatmap(mean(images, dims=3)[:,:,1], title="128 Frame Average", colormap=:jet, aspect_ratio=:equal)
-plot(p1, p2, layout=(1, 2), size=(900, 450))
-```
-
-The output HDF5 file contains:
-- `"images"`: simulated images ``(N_x, N_y, n)``
-- `"phases"`: phase screens ``(Np_x, Np_y, n)`` (if `savephases=true`, true by default)
-
-You can specify more saving options by passing an [`HDF5File`](@ref) object instead of the filename. This allows you to control group structure, file open mode, and other HDF5 parameters. Also you can omit file output entirely and return the results as a `NamedTuple` of arrays by setting `file=nothing` (which is the default).
-
-Let us consider another example with a true sky image:
-
-```@example psf_simulation
-images = simulate_images(ts_image, atm, img_spec; n=128, savephases=false).images
-p1 = heatmap(img, title="True Sky", colormap=:jet, aspect_ratio=:equal, cbar=false)
-p2 = heatmap(images[:, :, 1], title="Single Frame", colormap=:jet, aspect_ratio=:equal, cbar=false)
-p3 = heatmap(mean(images, dims=3)[:,:,1], title="128 Frame Average", colormap=:jet, aspect_ratio=:equal, cbar=false)
-plot(p1, p2, p3, layout=(1, 3), size=(1200, 450))
-```
-
-## Advanced options
-
-### Batch size
-
-Control batch size and HDF5 chunk size for better I/O performance:
-
-```julia
-simulate_images(ts, atm, img_spec; n=10000, batch=256, file="simulation.h5")
-```
-The default batch size is 128 images; this is reasonable for most use cases, increase if you have sufficient RAM and run in more than 64 threads or on GPU, decrease if you run out of memory. Note that chunk size in the HDF5 file is set to match the batch size.
-
-### Multi-threading and GPU acceleration
-
-When running large simulations, consider adding more CPU threads:
 ```bash
-julia --threads=auto  # use all available cores
+julia --threads=auto
 ```
 
-You can also enable GPU acceleration by specifying a device adapter. For example, to run on an NVIDIA GPU using CUDA.jl:
+GPU execution is selected by passing a device adapter, for example `deviceadapter=CuArray` after
+loading CUDA.jl:
+
 ```julia
 using CUDA
-# Set up atmosphere, imaging spec, true sky as before
-simulate_images(ts, atm, img_spec; n=100_000, file="simulation.h5", deviceadapter=CuArray)  # run on GPU
+simulate_images(PointSource(), atm, img_spec; n=100_000, file="simulation.h5", deviceadapter=CuArray)
 ```
 
 !!! warning
-    As of current version, only [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) has been tested. [AMDGPU.jl](https://github.com/JuliaGPU/AMDGPU.jl) should work without issues, [Metal.jl](https://github.com/JuliaGPU/Metal.jl) will not produce PSFs due to missing FFT support. Please open an issue if you encounter problems with these or other backends.
+    CUDA.jl is the only GPU backend currently tested. Other Julia GPU array backends may work if
+    they provide the required array operations and FFT support.
 
-### Memory considerations
+### Batch Size
 
-For very large grids or long runs:
-- Use Harding interpolation with `interpolate=:auto`
-- Reduce batch size if running out of RAM
-- Set `savephases=false` if phases aren't needed — this saves disk space
+The `batch` keyword controls both compute batch size and HDF5 chunk size along the image sequence dimension:
+
+```julia
+simulate_images(PointSource(), atm, img_spec; n=10_000, batch=256, file="simulation.h5")
+```
+
+The default batch size is 128. Increase it when enough memory is available, especially for many CPU
+threads or GPU execution. Decrease it if memory pressure is high.
+
+## Next Steps
+
+- Work through [Examples](@ref) for phase-screen generation, imaging simulations, and HDF5 output.
+- See [API Reference](@ref) for constructors and keyword arguments.
