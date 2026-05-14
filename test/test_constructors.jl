@@ -21,6 +21,22 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
         @test_throws ArgumentError HardingSpec((64, 64); interpolate_from=(8, 8))
     end
 
+    @testset "SavedPhases" begin
+        tmpfile = tempname() * ".h5"
+        data = reshape(Float32.(1:4*5*6), 4, 5, 6)
+        h5write(tmpfile, "phases", data)
+
+        h5open(tmpfile, "r") do fid
+            atm = SavedPhases(fid["phases"]; wind_velocity=(1, 2))
+            @test atm isa SavedPhases
+            @test atm.wind_velocity == (1, 2)
+
+            atm2 = SavedPhases(fid["phases"])
+            @test atm2.wind_velocity == (0, 0)
+        end
+        rm(tmpfile, force=true)
+    end
+
     @testset "FilterSpec" begin
         filter = FilterSpec(500; bandwidth=100, npts=5)
         @test filter.base_wavelength == 500

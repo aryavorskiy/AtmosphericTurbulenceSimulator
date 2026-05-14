@@ -66,4 +66,17 @@
 
         rm(tmpfile, force=true)
     end
+
+    @testset "Saved phases" begin
+        tmpfile = tempname() * ".h5"
+        simulate_images(atm, ImagingSpec(ap, nphotons=Inf), n=10, file=tmpfile)
+        img1 = h5read(tmpfile, "images")
+        img2 = h5open(tmpfile, "r") do fid
+            saved_atm = SavedPhases(fid["phases"]; wind_velocity=(1, 1))
+            simulate_images(saved_atm, ImagingSpec(ap, nphotons=Inf), n=10).images
+        end
+        @test img1 == img2
+
+        rm(tmpfile, force=true)
+    end
 end
