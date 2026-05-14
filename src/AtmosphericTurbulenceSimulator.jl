@@ -1,7 +1,7 @@
 module AtmosphericTurbulenceSimulator
 
 include("atmosphere.jl")
-export kolmogorov_covmat, SingleLayer
+export kolmogorov_covmat, SingleLayer, SavedPhases
 include("imaging.jl")
 export FilterSpec, ImagingSpec, PhotonCount, Exposure, PointSource, DoubleSystem, TrueSkyImage,
     CircularAperture

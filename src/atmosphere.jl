@@ -224,3 +224,73 @@ function harding_upsample!(to, from, noise_std)
         c_f * (to[inds_even_x .+ 3, inds_odd_y, :] + to[inds_even_x .- 3, inds_odd_y, :] +
                 to[inds_even_x, inds_odd_y .+ 3, :] + to[inds_even_x, inds_odd_y .- 3, :])
 end
+
+"""
+    SavedPhases(dataset[; wind_velocity=(0, 0)])
+
+An `AtmosphereSpec` that reuses phase screens saved in a dataset.
+
+The dataset must match the phase-screen layout written by [`simulate_phases`](@ref) and
+[`simulate_images`](@ref). Frames are read in order; if more frames are requested than
+available, an error is thrown, the tail of the last batch is filled with `NaN`s.
+
+# Arguments
+- `dataset`: a 3D array-like containing phase screens with dimensions `(nx, ny, nframes)`.
+  This can be an in-memory array or an HDF5 dataset (e.g. `HDF5.Dataset`).
+
+# Keyword Arguments
+- `wind_velocity`: two-component velocity used for long-exposure offsets in imaging simulations.
+"""
+struct SavedPhases{T<:Real,D,WT} <: AtmosphereSpec{T}
+    dataset::D
+    wind_velocity::NTuple{2,WT}
+end
+function SavedPhases(dataset; wind_velocity::NTuple{2,<:Real}=(0, 0))
+    T = eltype(dataset)
+    WT = typeof(wind_velocity[1])
+    return SavedPhases{T,typeof(dataset),WT}(dataset, wind_velocity)
+end
+
+mutable struct SavedPhaseBuffers{D,B,DB,CT}
+    dataset::D
+    device_buffer::DB
+    buffer::B
+    crop_indices::CT
+    next_frame::Int
+end
+plate_size(sampler::SavedPhaseBuffers) = size(sampler.buffer)[1:2]
+batch_length(sampler::SavedPhaseBuffers) = size(sampler.buffer, 3)
+phase_type(sampler::SavedPhaseBuffers) = eltype(sampler.buffer)
+function prepare_phasebuffers(spec::SavedPhases{T}, plate_size::NTuple{2,Int}, batch::Int, deviceadapter) where T
+    saved_size = size(spec.dataset)::NTuple{3,Int}
+    saved_plate_size = saved_size[1:2]
+    all(saved_plate_size .>= plate_size) || throw(ArgumentError(
+        "Saved phase dataset has plate size $saved_plate_size, but at least $plate_size was requested."
+    ))
+    # TODO correct computation of crop indices
+    crop_indices = (1:plate_size[1], 1:plate_size[2])
+    device_buffer = zeros(T, (plate_size..., batch))
+    buffer = Adapt.adapt_storage(deviceadapter, device_buffer)
+    return SavedPhaseBuffers(spec.dataset, device_buffer, buffer, crop_indices, 1)
+end
+function samplephases!(sampler::SavedPhaseBuffers)
+    nframes = size(sampler.dataset, 3)::Int
+    blen = batch_length(sampler)
+    zrange = range(sampler.next_frame, length=blen)
+    sampler.next_frame > nframes &&
+        throw(BoundsError(sampler.dataset, (sampler.crop_indices..., zrange)))
+    if last(zrange) > nframes
+        sampler.device_buffer[:, :, 1:(nframes - sampler.next_frame + 1)] =
+            sampler.dataset[sampler.crop_indices..., first(zrange):nframes]
+        sampler.device_buffer[:, :, (nframes - sampler.next_frame + 2):end] .= NaN
+    else
+        copyto!(sampler.device_buffer, sampler.dataset, sampler.crop_indices..., zrange)
+    end
+    sampler.next_frame += blen
+    if typeof(sampler.buffer) !== typeof(sampler.device_buffer)
+        copyto!(sampler.buffer, sampler.device_buffer)
+        return sampler.buffer
+    else
+        return sampler.device_buffer
+    end
+end
