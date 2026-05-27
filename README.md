@@ -3,7 +3,7 @@
 [![docs-dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aryavorskiy.github.io/AtmosphericTurbulenceSimulator.jl/dev/)
 [![CI](https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator.jl)
-[![JET](https://img.shields.io/badge/JET.jl-tested-green.svg)](https://github.com/aviatesk/JET.jl)
+[![JET](https://img.shields.io/badge/%F0%9F%9B%A9%EF%B8%8F_tested_with-JET.jl-233f9a)](https://github.com/aviatesk/JET.jl)
 
 A simple (yet) Julia toolchain to simulate atmospheric turbulence effects on imaging systems.
 
@@ -103,8 +103,7 @@ Please note that this package is in early development. There are multiple featur
     - [x] Harding interpolation
     - [ ] Frozen flow
     - [ ] Multi-layer atmospheres
-    - [ ] Fresnel propagation
+- [x] Long exposures
 - [ ] Multi-wavelength imaging
-- [ ] Coronagraph models
 - [ ] Wavefront sensor simulation (?)
-- [ ] FITS support (?)
+- [ ] FITS support

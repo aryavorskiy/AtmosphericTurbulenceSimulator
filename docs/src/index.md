@@ -72,12 +72,23 @@ For large grids, [`SingleLayer`](@ref) can use Harding interpolation ([Harding e
 The phase is sampled on a smaller grid and then upsampled in a way that preserves Kolmogorov statistics. `interpolate=:auto`
 selects a coarse grid size based on the default heuristic.
 
+You can also replay phase screens from a dataset or an array using the [`SavedPhases`](@ref) atmosphere specification.
+
 ## Imaging Model
+
+The parameters of the imaging system are defined by an [`ImagingSpec`](@ref) object, which includes the following fields:
+- The aperture function, which can be a predefined shape like [`CircularAperture`](@ref) or a user-defined array.
+- The photon budget, defined by a [`PhotonCount`](@ref) object that specifies the total number of photons and background level.
+- The filter specification, defined by a [`FilterSpec`](@ref) that sets the central wavelength and bandwidth for non-monochromatic simulations.
+- The exposure time, which can be used to simulate long exposures by averaging multiple phase screens together. See [`Exposure`](@ref).
 
 The imaging pipeline converts each phase screen into a PSF, applies the selected
 true-sky model, and optionally applies photon shot noise. A non-monochromatic [`FilterSpec`](@ref)
 scales both turbulence strength and diffraction with wavelength, while assuming that the aperture
 itself is achromatic.
+
+Long exposures are also supported by averaging multiple phase screens together. To simulate a long exposure, 
+you will need non-zero exposure time and a defined wind velocity in the atmosphere model. See [Examples#Long-Exposure-Imaging](@ref) for details.
 
 !!! note
     The sampled-bandpass model is most appropriate for narrow bands where the telescope pupil does
