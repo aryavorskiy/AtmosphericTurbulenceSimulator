@@ -46,7 +46,7 @@ struct HDF5File
 end
 
 """
-    HDF5File(filename[; group="", overwrite=false])
+    HDF5File(filename[, group=""][; overwrite=false])
 
 A convenience struct for specifying HDF5 output options.
 
@@ -56,7 +56,11 @@ A convenience struct for specifying HDF5 output options.
 - `overwrite`: if `true`, overwrite the group if it already exists (or the entire file if `group=""`),
     otherwise throw an error if datasets with the same name already exist (default: `false`).
 """
-HDF5File(filename::String; group::String="", overwrite::Bool=false) = HDF5File(filename, group, overwrite)
+HDF5File(filename::String, group::String; overwrite::Bool=false) = HDF5File(filename, group, overwrite)
+function HDF5File(filename::String; group="", kw...) # deprecated
+    group != "" && Base.depwarn("`HDF5File(filename; group=gr)` is deprecated and will be removed in v0.5; use `HDF5File(filename, gr)` instead.", :HDF5File)
+    HDF5File(filename, group; kw...)
+end
 function open_file(f::Function, h5file::HDF5File)
     h5open(h5file.filename, h5file.overwrite && h5file.group == "" ? "w" : "cw") do fid
         if h5file.group != ""

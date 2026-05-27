@@ -139,9 +139,7 @@ abstract type TrueSky end
 """
     PointSource()
 
-Simple true-sky brightness model. The photon budget and background are configured
-via the `ImagingSpec.photon_count` field. See [`ImagingSpec`](@ref) for details on
-configuring photon budget and background.
+Simple true-sky brightness model. Represents a non-resolved point source.
 """
 struct PointSource <: TrueSky end
 
@@ -149,8 +147,6 @@ struct PointSource <: TrueSky end
     DoubleSystem(rel_position, intensity)
 
 Model for a two-component source (binary): primary plus a secondary offset by `rel_position`.
-The photon budget and background are configured via the `ImagingSpec.photon_count` field.
-See [`ImagingSpec`](@ref) for details.
 
 # Arguments
 - `rel_position`: `(dx, dy)` integer tuple specifying the secondary's pixel offset.
@@ -166,9 +162,8 @@ end
 """
     TrueSkyImage(true_sky::AbstractMatrix{T})
 
-Wrap a real-valued true-sky image for use with the imaging pipeline. The photon budget and
-background are configured via the `ImagingSpec.photon_count` field. See [`ImagingSpec`](@ref)
-for details.
+Wrap a real-valued true-sky image for use with the imaging pipeline. The pixel scale matches
+that of the `ImagingSpec`.
 
 # Arguments
 - `true_sky`: real image array representing spatial sky brightness.
@@ -232,6 +227,8 @@ function ImagingSpec(aperture::AbstractMatrix{T}, photon_count::PhotonCount;
     return ImagingSpec{T, typeof(aperture)}(aperture, pc, fs, ex, img_size)
 end
 function ImagingSpec(aperture::AbstractMatrix; nphotons, background=nothing, kw...)
+    Base.depwarn("`ImagingSpec(ap; nphotons=..., background=...)` is deprecated and will be \
+        removed in v0.5. Use `ImagingSpec(ap, PhotonCount(nphotons, background))` instead.", :ImagingSpec)
     if background === nothing
         pc = PhotonCount(nphotons)
     else

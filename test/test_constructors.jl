@@ -64,21 +64,21 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
 
     @testset "ImagingSpec" begin
         ap = CircularAperture((32, 32), 15)
-        img_spec = ImagingSpec(ap; nphotons=Inf)
+        img_spec = ImagingSpec(ap, PhotonCount(Inf))
         @test size(img_spec.aperture) == (32, 32)
         @test img_spec.img_size == (64, 64)
 
-        img_spec_custom = ImagingSpec(ap; nphotons=Inf, nyquist_oversample=1.5)
+        img_spec_custom = ImagingSpec(ap, PhotonCount(Inf); nyquist_oversample=1.5)
         @test img_spec_custom.img_size == (96, 96)
 
         # Test with filter
         filter = FilterSpec(500.0; bandwidth=100.0)
-        img_spec_filter = ImagingSpec(ap; nphotons=1e6, background=10, filter=FilterSpec(500.0; bandwidth=100.0))
+        img_spec_filter = ImagingSpec(ap, PhotonCount(1e6, 10); filter=FilterSpec(500.0; bandwidth=100.0))
         @test img_spec_filter.filter_spec.base_wavelength == 500.0
         @test img_spec_filter.photon_count.nphotons == 1e6
         @test img_spec_filter.photon_count.background == 10
 
-        @test_throws ArgumentError ImagingSpec(ap; nphotons=1e6)
+        @test_throws ArgumentError ImagingSpec(ap, PhotonCount(1e6))
     end
 
     @testset "TrueSky models" begin
@@ -105,7 +105,7 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
 
     @testset "ImgBufSerial & ImgBufParallel" begin
         ap = CircularAperture((16, 16))
-        img_spec = ImagingSpec(ap; nphotons=1e6, background=100)
+        img_spec = ImagingSpec(ap, PhotonCount(1e6, 100))
         atm = SingleLayer(5.0)
 
         img_buf_serial = prepare_buffers(Int32, atm, img_spec, 5, identity)[2]
@@ -119,7 +119,7 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
         @test length(img_buf_parallel.offsets) == 1
         @test img_buf_parallel.offsets[1].can_ff
 
-        img_spec2 = ImagingSpec(ap; nphotons=1e6, background=100, exposure=Exposure(0.1, 10))
+        img_spec2 = ImagingSpec(ap, PhotonCount(1e6, 100); exposure=Exposure(0.1, 10))
         img_buf2 = prepare_buffers(Int32, atm, img_spec2, 5, identity)[2]
         @test length(img_buf2.offsets) == 1
         @test img_buf2.offsets[1].can_ff
@@ -130,7 +130,7 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
         @test img_buf3.offsets[1].can_ff
         @test !img_buf3.offsets[2].can_ff
 
-        img_spec3 = ImagingSpec(ap; nphotons=1e6, background=100, exposure=Exposure(0, 10))
+        img_spec3 = ImagingSpec(ap, PhotonCount(1e6, 100); exposure=Exposure(0, 10))
         img_buf4 = prepare_buffers(Int32, atm2, img_spec3, 5, identity)[2]
         @test length(img_buf4.offsets) == 1
         @test img_buf4.offsets[1].can_ff

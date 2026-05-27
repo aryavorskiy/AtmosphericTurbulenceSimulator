@@ -34,7 +34,7 @@
 
     @testset "Continuous vs Poisson" begin
         # Continuous flux
-        img_spec_cont = ImagingSpec(ap; nphotons=Inf)
+        img_spec_cont = ImagingSpec(ap, PhotonCount(Inf))
         ts_cont = PointSource()
         @test_throws ArgumentError simulate_images(Int32, ts_cont, atm, img_spec_cont; n=16)
 
@@ -43,7 +43,7 @@
         @test all(>=(-eps()), images_cont)
 
         # Poisson sampling
-        img_spec_poisson = ImagingSpec(ap; nphotons=1e6, background=100)
+        img_spec_poisson = ImagingSpec(ap, PhotonCount(1e6, 100))
         ts_poisson = PointSource()
         images_poisson = simulate_images(ts_poisson, atm, img_spec_poisson; n=16, file=nothing, verbose=false, deviceadapter=identity).images
 
@@ -53,7 +53,7 @@
 
     @testset "No phases" begin
         ts = PointSource()
-        img_spec_float = ImagingSpec(ap; nphotons=Inf)
+        img_spec_float = ImagingSpec(ap, PhotonCount(Inf))
 
         tmpfile = tempname() * ".h5"
         simulate_images(Float32, ts, atm, img_spec_float; n=16, file=tmpfile, savephases=false,
@@ -69,11 +69,11 @@
 
     @testset "Saved phases" begin
         tmpfile = tempname() * ".h5"
-        simulate_images(atm, ImagingSpec(ap, nphotons=Inf), n=10, file=tmpfile)
+        simulate_images(atm, ImagingSpec(ap, PhotonCount(Inf)), n=10, file=tmpfile)
         img1 = h5read(tmpfile, "images")
         img2 = h5open(tmpfile, "r") do fid
             saved_atm = SavedPhases(fid["phases"]; wind_velocity=(1, 1))
-            simulate_images(saved_atm, ImagingSpec(ap, nphotons=Inf), n=10).images
+            simulate_images(saved_atm, ImagingSpec(ap, PhotonCount(Inf)), n=10).images
         end
         @test img1 == img2
 
