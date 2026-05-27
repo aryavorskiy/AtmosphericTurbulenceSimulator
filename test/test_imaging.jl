@@ -69,14 +69,20 @@
 
     @testset "Saved phases" begin
         tmpfile = tempname() * ".h5"
-        simulate_images(atm, ImagingSpec(ap, PhotonCount(Inf)), n=10, file=tmpfile)
+        img_spec1 = ImagingSpec(ap, PhotonCount(Inf))
+        simulate_images(atm, img_spec1, n=10, file=tmpfile)
         img1 = h5read(tmpfile, "images")
         img2 = h5open(tmpfile, "r") do fid
             saved_atm = SavedPhases(fid["phases"]; wind_velocity=(1, 1))
-            simulate_images(saved_atm, ImagingSpec(ap, PhotonCount(Inf)), n=10).images
+            simulate_images(saved_atm, img_spec1, n=10).images
         end
+        rm(tmpfile, force=true)
         @test img1 == img2
 
-        rm(tmpfile, force=true)
+        img_spec2 = ImagingSpec(ap, PhotonCount(Inf), exposure=Exposure(3, 3))
+        res_e = simulate_images(atm, img_spec2, n=10)
+        img_e1 = res_e.images
+        img_e2 = simulate_images(SavedPhases(res_e.phases; wind_velocity=(1, 1)), img_spec2, n=10).images
+        @test img_e1 == img_e2
     end
 end

@@ -45,8 +45,12 @@ function read_batch!(dest, bd::BufferedDataset, j, ix=Colon(), iy=Colon())
     j1 > nframes && throw(BoundsError(bd.dataset, (ix, iy, j1)))
     n_avail = min(batch_len, nframes - j1 + 1)
     if n_avail == batch_len
-        _copyto!(bd.buffer, bd.dataset, :, :, j1:j1 + batch_len - 1)
-        dest .= @view bd.buffer[ix, iy, :]
+        if bd.buffer === nothing || typeof(bd.buffer) === typeof(dest)
+            _copyto!(dest, bd.dataset, ix, iy, j1:j1 + batch_len - 1)
+        else
+            _copyto!(bd.buffer, bd.dataset, :, :, j1:j1 + batch_len - 1)
+            dest .= @view bd.buffer[ix, iy, :]
+        end
     else
         dest[:, :, 1:n_avail] .= bd.dataset[ix, iy, j1:nframes]
         dest[:, :, n_avail + 1:end] .= NaN
