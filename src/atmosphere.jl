@@ -251,12 +251,11 @@ function SavedPhases(dataset; wind_velocity::NTuple{2,<:Real}=(0, 0))
     return SavedPhases{T,typeof(dataset),WT}(dataset, wind_velocity)
 end
 
-mutable struct SavedPhaseBuffers{D,B,DB,CT}
-    dataset::D
-    device_buffer::DB
-    buffer::B
+mutable struct SavedPhaseBuffers{BDT, BT, CT}
+    bd::BDT
+    buffer::BT
     crop_indices::CT
-    next_frame::Int
+    batch_idx::Int
 end
 plate_size(sampler::SavedPhaseBuffers) = size(sampler.buffer)[1:2]
 batch_length(sampler::SavedPhaseBuffers) = size(sampler.buffer, 3)
@@ -267,30 +266,14 @@ function prepare_phasebuffers(spec::SavedPhases{T}, plate_size::NTuple{2,Int}, b
     all(saved_plate_size .>= plate_size) || throw(ArgumentError(
         "Saved phase dataset has plate size $saved_plate_size, but at least $plate_size was requested."
     ))
-    # TODO correct computation of crop indices
     crop_indices = (1:plate_size[1], 1:plate_size[2])
-    device_buffer = zeros(T, (plate_size..., batch))
-    buffer = Adapt.adapt_storage(deviceadapter, device_buffer)
-    return SavedPhaseBuffers(spec.dataset, device_buffer, buffer, crop_indices, 1)
+    bd = BufferedDataset(spec.dataset, batch)
+    buffer = Adapt.adapt_storage(deviceadapter, zeros(T, (plate_size..., batch)))
+    return SavedPhaseBuffers(bd, buffer, crop_indices, 1)
 end
 function samplephases!(sampler::SavedPhaseBuffers)
-    nframes = size(sampler.dataset, 3)::Int
-    blen = batch_length(sampler)
-    zrange = range(sampler.next_frame, length=blen)
-    sampler.next_frame > nframes &&
-        throw(BoundsError(sampler.dataset, (sampler.crop_indices..., zrange)))
-    if last(zrange) > nframes
-        sampler.device_buffer[:, :, 1:(nframes - sampler.next_frame + 1)] =
-            sampler.dataset[sampler.crop_indices..., first(zrange):nframes]
-        sampler.device_buffer[:, :, (nframes - sampler.next_frame + 2):end] .= NaN
-    else
-        copyto!(sampler.device_buffer, sampler.dataset, sampler.crop_indices..., zrange)
-    end
-    sampler.next_frame += blen
-    if typeof(sampler.buffer) !== typeof(sampler.device_buffer)
-        copyto!(sampler.buffer, sampler.device_buffer)
-        return sampler.buffer
-    else
-        return sampler.device_buffer
-    end
+    read_batch!(sampler.buffer, sampler.bd, sampler.batch_idx,
+        sampler.crop_indices[1], sampler.crop_indices[2])
+    sampler.batch_idx += 1
+    return sampler.buffer
 end

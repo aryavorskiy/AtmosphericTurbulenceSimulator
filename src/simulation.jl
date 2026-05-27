@@ -1,30 +1,5 @@
-const DEFAULT_BATCH = 128
-
-struct BufferedDataset{Dt,Bt}
-    dataset::Dt
-    buffer::Bt
-end
-_make_buffer(ds::HDF5.Dataset) =
-    zeros(eltype(ds), HDF5.get_create_properties(ds).chunk::NTuple{3,Int})
-_make_buffer(::Union{<:AbstractArray, Nothing}) = nothing
-BufferedDataset(ds1) = BufferedDataset(ds1, _make_buffer(ds1))
-function write_batch!(bd::BufferedDataset{<:HDF5.Dataset}, j, batch)
-    copy!(bd.buffer, batch)
-    HDF5.do_write_chunk(bd.dataset, (1, 1, (j - 1) * size(batch, 3) + 1), bd.buffer)
-end
-function write_batch!(bd::BufferedDataset{<:AbstractArray}, j, batch)
-    batch_len = size(batch, 3)
-    dset_len = size(bd.dataset, 3)::Int
-    j1 = (j - 1) * batch_len + 1
-    if dset_len > j * batch_len
-        bd.dataset[:, :, j1:j1 + batch_len - 1] .= batch
-    else
-        bd.dataset[:, :, j1:end] .= @view batch[:, :, 1:dset_len - j1 + 1]
-    end
-end
-write_batch!(::BufferedDataset{Nothing}, _, _) = nothing
-
-function simulation_run!!(img_bd, phs_bd, phase_buffers, image_buffers, true_sky_adapt, n; verbose=true)
+function simulation_run!!(img_bd::BufferedDataset, phs_bd::BufferedDataset, phase_buffers,
+        image_buffers, true_sky_adapt, n; verbose=true)
     batch = batch_length(phase_buffers)
     p = Progress(n, desc="Simulating images", enabled=verbose, dt=1)
     for j in 1:cld(n, batch)
@@ -39,48 +14,6 @@ function simulation_run!!(img_bd, phs_bd, phase_buffers, image_buffers, true_sky
     finish!(p)
 end
 
-struct HDF5File
-    filename::String
-    group::String
-    overwrite::Bool
-end
-
-"""
-    HDF5File(filename[, group=""][; overwrite=false])
-
-A convenience struct for specifying HDF5 output options.
-
-# Arguments
-- `filename`: name of the HDF5 file to write to.
-- `group`: optional group within the HDF5 file to write datasets to (default: root group).
-- `overwrite`: if `true`, overwrite the group if it already exists (or the entire file if `group=""`),
-    otherwise throw an error if datasets with the same name already exist (default: `false`).
-"""
-HDF5File(filename::String, group::String; overwrite::Bool=false) = HDF5File(filename, group, overwrite)
-function HDF5File(filename::String; group="", kw...) # deprecated
-    group != "" && Base.depwarn("`HDF5File(filename; group=gr)` is deprecated and will be removed in v0.5; use `HDF5File(filename, gr)` instead.", :HDF5File)
-    HDF5File(filename, group; kw...)
-end
-function open_file(f::Function, h5file::HDF5File)
-    h5open(h5file.filename, h5file.overwrite && h5file.group == "" ? "w" : "cw") do fid
-        if h5file.group != ""
-            h5file.overwrite && haskey(fid, h5file.group) && HDF5.delete_object(fid[h5file.group])
-            f(create_group(fid, h5file.group))
-        else
-            f(fid)
-        end
-    end
-end
-open_file(f::Function, filename::String) = if endswith(lowercase(filename), r".h(df)?5")
-    open_file(f, HDF5File(filename))
-else
-    throw(ArgumentError("Unsupported file extension: $filename. HDF5 expected."))
-end
-open_file(f::Function, ::Nothing) = f(nothing)
-prepare_dataset(fid::Union{HDF5.File,HDF5.Group}, name::String, type, sz, n, batch) =
-    BufferedDataset(create_dataset(fid, name, type, (sz..., n), chunk=(sz..., batch)))
-prepare_dataset(::Nothing, ::String, ::Type{T}, sz, n, ::Int) where T =
-    BufferedDataset(Array{T}(undef, (sz..., n)))
 function simulation_run(file, phsbuffers, imgbuffers, true_sky_adapt, n;
             verbose=true, savephases::Bool=true)
     open_file(file) do fid
