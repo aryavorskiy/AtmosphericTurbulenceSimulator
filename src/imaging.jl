@@ -1,4 +1,4 @@
-using LinearAlgebra, FFTW, Distributions, HDF5, ProgressMeter, Adapt
+using LinearAlgebra, FFTW, Distributions, HDF5, ProgressMeter, Adapt, ChunkSplitters
 
 """
     FilterSpec
@@ -402,8 +402,9 @@ function compute_images!(img_buf::ImgBufSerial, phases, true_sky)
     return img_buf.opt_buffer.read_buffer
 end
 
-struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT}
+struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT,CT}
     opt_bufs::Vector{BT}
+    chunk_ranges::Vector{CT}
     spec::ST
     psf_norm::FT
     offsets::Vector{OT}
@@ -412,23 +413,23 @@ end
 image_size(img_buf::ImgBufParallel) = image_size(img_buf.opt_bufs[1])
 image_type(img_buf::ImgBufParallel) = eltype(img_buf.img_array)
 function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int, deviceadapter::Type{<:Array}) where T
-    opt_buffer1 = OpticalBuffers(T, img_spec, 1)
+    nbufs = min(Threads.nthreads(), batch)
+    chunk_ranges = collect(chunks(1:batch; n=nbufs))
+    opt_buffer1 = OpticalBuffers(T, img_spec, length(chunk_ranges[1]))
     img_array = similar(opt_buffer1.read_buffer, image_size(img_spec)..., batch)
-    opt_bufs = Array{typeof(opt_buffer1)}(undef, Threads.nthreads())
+    opt_bufs = Array{typeof(opt_buffer1)}(undef, nbufs)
     opt_bufs[1] = opt_buffer1
-    Threads.@threads for i in 2:Threads.nthreads()
-        opt_bufs[i] = OpticalBuffers(T, img_spec, 1)
+    Threads.@threads for i in 2:nbufs
+        opt_bufs[i] = OpticalBuffers(T, img_spec, length(chunk_ranges[i]))
     end
     return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec), batch, deviceadapter),
-        ImgBufParallel(opt_bufs, img_spec, psf_norm(img_spec), long_exp_offsets(atm_spec, img_spec), img_array)
+        ImgBufParallel(opt_bufs, chunk_ranges, img_spec, psf_norm(img_spec), long_exp_offsets(atm_spec, img_spec), img_array)
 end
 function compute_images!(img_buf::ImgBufParallel, phases, true_sky)
     Threads.@threads for i in eachindex(img_buf.opt_bufs)
-        opt_buffer = img_buf.opt_bufs[i]
-        for j in i:length(img_buf.opt_bufs):size(phases, 3)
-            _compute_images!(view(img_buf.img_array, :, :, j), opt_buffer, img_buf.spec,
-                view(phases, :, :, j), true_sky, img_buf.offsets, img_buf.psf_norm)
-        end
+        chunk_range = img_buf.chunk_ranges[i]
+        _compute_images!(view(img_buf.img_array, :, :, chunk_range), img_buf.opt_bufs[i], img_buf.spec,
+            view(phases, :, :, chunk_range), true_sky, img_buf.offsets, img_buf.psf_norm)
     end
     return img_buf.img_array
 end
