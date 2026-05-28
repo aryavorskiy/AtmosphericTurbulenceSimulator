@@ -103,7 +103,11 @@ Please note that this package is in early development. There are multiple featur
     - [x] Harding interpolation
     - [ ] Frozen flow
     - [ ] Multi-layer atmospheres
+- Input/Output
+    - [x] HDF5 support
+    - [ ] FITS support
+    - [x] Phase loader
+    - [ ] PSF loader for true-sky application
 - [x] Long exposures
 - [ ] Multi-wavelength imaging
-- [ ] Wavefront sensor simulation (?)
-- [ ] FITS support
+- [ ] Wavefront sensor simulation

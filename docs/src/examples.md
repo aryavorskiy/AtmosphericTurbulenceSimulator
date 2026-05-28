@@ -153,9 +153,9 @@ atm_saved = SavedPhases(phases; wind_velocity=(1, 1))   # wind velocity 1.41 pix
 ap = CircularAperture((64, 64), 30)
 img_short = simulate_images(atm_saved, ImagingSpec(ap, PhotonCount(Inf)); n=1).images[:, :, 1]
 img_medium = simulate_images(atm_saved, 
-    ImagingSpec(ap, PhotonCount(Inf), exposure=Exposure(10, 10)); n=1).images[:, :, 1]
+    ImagingSpec(ap, PhotonCount(Inf), exposure=Exposure(10, 10)); n=1).images[:, :, 1]  # vt = 14.1 pixels = 0.44 m
 img_long = simulate_images(atm_saved, 
-    ImagingSpec(ap, PhotonCount(Inf), exposure=Exposure(50, 10)); n=1).images[:, :, 1]
+    ImagingSpec(ap, PhotonCount(Inf), exposure=Exposure(50, 10)); n=1).images[:, :, 1]  # vt = 70.7 pixels = 2.2 m
 
 hmap_kws = (; colormap=:jet, aspect_ratio=:equal, cbar=false, clims=(0, maximum(img_short)))
 p1 = heatmap(img_short; title="Short exposure", hmap_kws...)

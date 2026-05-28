@@ -23,5 +23,5 @@ Pages = ["imaging.jl"]
 ## Running simulations
 ```@autodocs
 Modules = [AtmosphericTurbulenceSimulator]
-Pages = ["simulation.jl"]
+Pages = ["simulation.jl", "io.jl"]
 ```
