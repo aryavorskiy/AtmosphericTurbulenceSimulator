@@ -232,7 +232,7 @@ An `AtmosphereSpec` that reuses phase screens saved in a dataset.
 
 The dataset must match the phase-screen layout written by [`simulate_phases`](@ref) and
 [`simulate_images`](@ref). Frames are read in order; if more frames are requested than
-available, an error is thrown, the tail of the last batch is filled with `NaN`s.
+available, an error is thrown, there is no guarantee what is in the tail of the last batch.
 
 # Arguments
 - `dataset`: a 3D array-like containing phase screens with dimensions `(nx, ny, nframes)`.

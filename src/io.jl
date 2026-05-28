@@ -62,7 +62,6 @@ function read_batch!(dest, bd::BufferedDataset, j::Int, ix::RangeType=:, iy::Ran
         end
     else
         dataset_tail = Array(bd.dataset[:, :, j1:nframes])
-        fill!(dest, NaN)
         copyto!(dest, CartesianIndices((axes(dest, 1), axes(dest, 2), 1:n_avail)),
             dataset_tail, CartesianIndices(dataset_tail))
     end

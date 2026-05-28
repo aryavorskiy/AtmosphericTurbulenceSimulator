@@ -48,7 +48,6 @@
             phases = simulate_phases(atm, (6, 7); n=9, batch=3, verbose=false)
             @test eltype(phases) == Float32
             @test phases[:, :, 1:7] == data
-            @test all(isnan, phases[:, :, 8:9])
 
             phases2 = simulate_phases(atm, (4, 5); n=3, verbose=false)
             @test phases2[:, :, 1:3] == data[1:4, 1:5, 1:3]

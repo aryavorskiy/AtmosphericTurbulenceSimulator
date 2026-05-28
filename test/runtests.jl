@@ -1,7 +1,6 @@
 using Test
 using AtmosphericTurbulenceSimulator
-using LinearAlgebra
-using Statistics
+using LinearAlgebra, Random, Statistics
 using HDF5, ProgressMeter
 using JET
 
