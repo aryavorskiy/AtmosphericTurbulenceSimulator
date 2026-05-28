@@ -96,11 +96,12 @@ the results to an HDF5 file.
 - `verbose`: show progress meter (true by default).
 - `savephases`: when true (default), the sampled phase screens are saved in the HDF5 in dataset with
   key `"phases"`.
-- `deviceadapter`: adapter for device-backed arrays (defaults to `Array`). To use GPU arrays,
-  pass e.g. `CUDA.CuArray` here (requires CUDA.jl).
+- `deviceadapter`: adapter for device-backed arrays (defaults to `MultiThreaded()`). To use GPU
+  arrays, pass e.g. `CUDA.CuArray` here (requires CUDA.jl). To control the number of CPU threads
+  used, pass e.g. `MultiThreaded(4)`.
 """
 function simulate_images(::Type{T}, true_sky::TrueSky, atm_spec::AtmosphereSpec, img_spec::ImagingSpec;
-    n::Int, batch::Int=DEFAULT_BATCH, file=nothing, verbose=true, savephases::Bool=true, deviceadapter=Array) where {T}
+    n::Int, batch::Int=DEFAULT_BATCH, file=nothing, verbose=true, savephases::Bool=true, deviceadapter=MultiThreaded()) where {T}
     if !isfinite_photons(img_spec.photon_count) && T <: Integer
         throw(ArgumentError("Integer image eltype not compatible with infinite-photon imaging spec."))
     end

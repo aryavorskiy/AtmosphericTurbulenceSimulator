@@ -1,7 +1,7 @@
 using Test
 using AtmosphericTurbulenceSimulator
 using LinearAlgebra, Random, Statistics
-using HDF5, ProgressMeter
+using HDF5, ProgressMeter, ChunkSplitters
 using JET
 
 include("test_constructors.jl")

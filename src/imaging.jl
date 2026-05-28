@@ -402,6 +402,19 @@ function compute_images!(img_buf::ImgBufSerial, phases, true_sky)
     return img_buf.opt_buffer.read_buffer
 end
 
+"""
+    MultiThreaded([AT=Array, ]nworkers=Threads.nthreads())
+
+Device adapter that enables multi-threaded phase generation and imaging on CPU. `AT` is the
+underlying array type; `nworkers` controls how many threads are used (defaults to
+`Threads.nthreads()`).
+"""
+struct MultiThreaded{AT}
+    nworkers::Int
+end
+MultiThreaded(::Type{AT}, nworkers::Int=Threads.nthreads()) where {AT} = MultiThreaded{AT}(nworkers)
+MultiThreaded(nworkers::Int=Threads.nthreads()) = MultiThreaded{identity}(nworkers)
+Adapt.adapt_storage(::MultiThreaded{AT}, x) where {AT} = Adapt.adapt_storage(AT, x)
 struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT,CT}
     opt_bufs::Vector{BT}
     chunk_ranges::Vector{CT}
@@ -412,8 +425,8 @@ struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT,CT}
 end
 image_size(img_buf::ImgBufParallel) = image_size(img_buf.opt_bufs[1])
 image_type(img_buf::ImgBufParallel) = eltype(img_buf.img_array)
-function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int, deviceadapter::Type{<:Array}) where T
-    nbufs = min(Threads.nthreads(), batch)
+function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int, adapter::MultiThreaded) where T
+    nbufs = min(adapter.nworkers, batch)
     chunk_ranges = collect(chunks(1:batch; n=nbufs))
     opt_buffer1 = OpticalBuffers(T, img_spec, length(chunk_ranges[1]))
     img_array = similar(opt_buffer1.read_buffer, image_size(img_spec)..., batch)
@@ -422,7 +435,7 @@ function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int,
     Threads.@threads for i in 2:nbufs
         opt_bufs[i] = OpticalBuffers(T, img_spec, length(chunk_ranges[i]))
     end
-    return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec), batch, deviceadapter),
+    return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec), batch, adapter),
         ImgBufParallel(opt_bufs, chunk_ranges, img_spec, psf_norm(img_spec), long_exp_offsets(atm_spec, img_spec), img_array)
 end
 function compute_images!(img_buf::ImgBufParallel, phases, true_sky)

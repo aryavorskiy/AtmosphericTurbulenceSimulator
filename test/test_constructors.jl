@@ -108,30 +108,31 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
         img_spec = ImagingSpec(ap, PhotonCount(1e6, 100))
         atm = SingleLayer(5.0)
 
-        img_buf_serial = prepare_buffers(Int32, atm, img_spec, 5, identity)[2]
+        img_buf_serial = prepare_buffers(Int32, atm, img_spec, 5, Array)[2]
         @test img_buf_serial isa AtmosphericTurbulenceSimulator.ImgBufSerial
         @test length(img_buf_serial.offsets) == 1
         @test img_buf_serial.offsets[1].can_ff
 
-        img_buf_parallel = prepare_buffers(Int32, atm, img_spec, 5, Array)[2]
+        img_buf_parallel = prepare_buffers(Int32, atm, img_spec, 5, MultiThreaded(2))[2]
         @test img_buf_parallel isa AtmosphericTurbulenceSimulator.ImgBufParallel
-        @test length(img_buf_parallel.opt_bufs) == Threads.nthreads()
+        @test length(img_buf_parallel.opt_bufs) == 2
+        @test sum(length, img_buf_parallel.chunk_ranges) == 5
         @test length(img_buf_parallel.offsets) == 1
         @test img_buf_parallel.offsets[1].can_ff
 
         img_spec2 = ImagingSpec(ap, PhotonCount(1e6, 100); exposure=Exposure(0.1, 10))
-        img_buf2 = prepare_buffers(Int32, atm, img_spec2, 5, identity)[2]
+        img_buf2 = prepare_buffers(Int32, atm, img_spec2, 5, Array)[2]
         @test length(img_buf2.offsets) == 1
         @test img_buf2.offsets[1].can_ff
 
         atm2 = SingleLayer(5.0; interpolate=:auto, wind_velocity=(10.0, 5.0))
-        img_buf3 = prepare_buffers(Int32, atm2, img_spec2, 5, identity)[2]
+        img_buf3 = prepare_buffers(Int32, atm2, img_spec2, 5, Array)[2]
         @test length(img_buf3.offsets) == 10
         @test img_buf3.offsets[1].can_ff
         @test !img_buf3.offsets[2].can_ff
 
         img_spec3 = ImagingSpec(ap, PhotonCount(1e6, 100); exposure=Exposure(0, 10))
-        img_buf4 = prepare_buffers(Int32, atm2, img_spec3, 5, identity)[2]
+        img_buf4 = prepare_buffers(Int32, atm2, img_spec3, 5, Array)[2]
         @test length(img_buf4.offsets) == 1
         @test img_buf4.offsets[1].can_ff
     end
