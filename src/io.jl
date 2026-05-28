@@ -37,8 +37,12 @@ end
 write_batch!(::BufferedDataset{Nothing}, _, _) = nothing
 
 _copyto!(dest, ds::HDF5.Dataset, ix, iy, iz) = copyto!(dest, ds, ix, iy, iz)
-_copyto!(dest, ds::AbstractArray, ix, iy, iz) = copy!(dest, @view ds[ix, iy, iz])
-function read_batch!(dest, bd::BufferedDataset, j, ix=Colon(), iy=Colon())
+function _copyto!(dest, ds::AbstractArray, ix, iy, iz)
+    src_indices = Base.to_indices(ds, (ix, iy, iz))
+    copyto!(dest, CartesianIndices(dest), ds, CartesianIndices(src_indices))
+end
+function read_batch!(dest, bd::BufferedDataset, j, ix::AbstractRange=:, iy::AbstractRange=:)
+    @assert bd.buffer === nothing || size(dest) == size(@view bd.buffer[ix, iy, :])
     batch_len = size(dest, 3)
     nframes = size(bd.dataset, 3)
     j1 = (j - 1) * batch_len + 1
@@ -49,11 +53,13 @@ function read_batch!(dest, bd::BufferedDataset, j, ix=Colon(), iy=Colon())
             _copyto!(dest, bd.dataset, ix, iy, j1:j1 + batch_len - 1)
         else
             _copyto!(bd.buffer, bd.dataset, :, :, j1:j1 + batch_len - 1)
-            dest .= @view bd.buffer[ix, iy, :]
+            _copyto!(dest, bd.buffer, ix, iy, :)
         end
     else
-        dest[:, :, 1:n_avail] .= bd.dataset[ix, iy, j1:nframes]
-        dest[:, :, n_avail + 1:end] .= NaN
+        dataset_tail = Array(bd.dataset[:, :, j1:nframes])
+        fill!(dest, NaN)
+        copyto!(dest, CartesianIndices((axes(dest, 1), axes(dest, 2), 1:n_avail)),
+            dataset_tail, CartesianIndices(dataset_tail))
     end
 end
 
