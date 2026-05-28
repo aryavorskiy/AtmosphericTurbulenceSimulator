@@ -41,7 +41,8 @@ function _copyto!(dest, ds::AbstractArray, ix, iy, iz)
     src_indices = Base.to_indices(ds, (ix, iy, iz))
     copyto!(dest, CartesianIndices(dest), ds, CartesianIndices(src_indices))
 end
-function read_batch!(dest, bd::BufferedDataset, j, ix::AbstractRange=:, iy::AbstractRange=:)
+const RangeType = Union{AbstractRange, Colon}
+function read_batch!(dest, bd::BufferedDataset, j::Int, ix::RangeType=:, iy::RangeType=:)
     @assert bd.buffer === nothing || size(dest) == size(@view bd.buffer[ix, iy, :])
     batch_len = size(dest, 3)
     nframes = size(bd.dataset, 3)
