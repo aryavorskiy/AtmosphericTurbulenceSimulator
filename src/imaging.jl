@@ -56,17 +56,18 @@ function BilinearShift(to::AbstractArray, offset::NTuple{2})
     ty = convert(eltype(to), offset[2] - floor(offset[2]))
     return BilinearInterpolator(ix, iy, ixp1, iyp1, tx, ty, all(isinteger, offset))
 end
-function interpolate_mapmuladd!(to::AbstractArray, from::AbstractArray, interp::BilinearInterpolator, factor, g=identity)
+function interpolate_mapmuladd!(to::AbstractArray, from::AbstractArray, interp::BilinearInterpolator,
+        factor, g=identity, h=identity)
     tx = interp.tx
     ty = transpose(interp.ty)
     if interp.can_ff
-        @views @inbounds @. to += factor * g(from[interp.ix, interp.iy, :])
+        @views @inbounds @. to += factor * g(h(from[interp.ix, interp.iy, :]))
     else
         @views @inbounds @. to += factor * g(
-            (1 - tx) * (1 - ty) * from[interp.ix, interp.iy, :] +
-            tx * (1 - ty) * from[interp.ixp1, interp.iy, :] +
-            (1 - tx) * ty * from[interp.ix, interp.iyp1, :] +
-            tx * ty * from[interp.ixp1, interp.iyp1, :])
+            (1 - tx) * (1 - ty) * h(from[interp.ix, interp.iy, :]) +
+            tx * (1 - ty) * h(from[interp.ixp1, interp.iy, :]) +
+            (1 - tx) * ty * h(from[interp.ix, interp.iyp1, :]) +
+            tx * ty * h(from[interp.ixp1, interp.iyp1, :]))
     end
     return to
 end
@@ -264,8 +265,12 @@ function OpticalBuffers(::Type{T}, img_spec::ImagingSpec{NT}, batch::Int) where 
     buf2 = similar(buf1)
     psf_buffer = similar(buf1, NT, img_spec.img_size..., batch)
     read_buffer = similar(buf1, T, img_spec.img_size..., batch)
-    interpolators = [BilinearScale(psf_buffer, img_spec.filter_spec.wavelengths[w] /
+    if nwavel(img_spec.filter_spec) == 1
+        interpolators = [BilinearShift(psf_buffer, (0, 0))]
+    else
+        interpolators = [BilinearScale(psf_buffer, img_spec.filter_spec.wavelengths[w] /
         img_spec.filter_spec.base_wavelength) for w in 1:nwavel(img_spec.filter_spec)]
+    end
     return OpticalBuffers(buf1, buf2, psf_buffer, read_buffer, plan_fft(buf1, (1, 2)), interpolators)
 end
 function write_phases!(aperture_buffer, phases, aperture, filter_spec, offset)
@@ -275,7 +280,7 @@ function write_phases!(aperture_buffer, phases, aperture, filter_spec, offset)
     for w in 1:nwavel(filter_spec)
         scale = filter_spec.wavelengths[w] / filter_spec.base_wavelength
         ap_slice = @view aperture_buffer[Cx - M ÷ 2 + 1:Cx - M ÷ 2 + M, Cy - N ÷ 2 + 1:Cy - N ÷ 2 + N, :, w]
-        interpolate_mapmuladd!(ap_slice, phases, offset, aperture, ComposedFunction(cis, Base.Fix2(*, scale)))
+        interpolate_mapmuladd!(ap_slice, phases, offset, aperture, cis, Base.Fix2(*, scale))
     end
 end
 write_phases!(bufs::OpticalBuffers, phases, img_spec::ImagingSpec, offset) =
@@ -284,12 +289,11 @@ write_phases!(bufs::OpticalBuffers, phases, img_spec::ImagingSpec, offset) =
 function phases_to_psf!(bufs::OpticalBuffers, img_spec::ImagingSpec)
     mul!(bufs.aperture_buffer, bufs.fftplan, bufs.focal_buffer)
     fftshift!(bufs.focal_buffer, bufs.aperture_buffer, (1, 2))
-    bufs.aperture_buffer .= abs2.(bufs.focal_buffer)
     for w in 1:nwavel(img_spec.filter_spec)
-        mono_psf_block = view(bufs.aperture_buffer, :, :, :, w)
+        mono_psf_field_block = view(bufs.focal_buffer, :, :, :, w)
         scale = img_spec.filter_spec.wavelengths[w] / img_spec.filter_spec.base_wavelength
         factor = img_spec.filter_spec.intensities[w] / scale^2
-        interpolate_mapmuladd!(bufs.psf_buffer, mono_psf_block, bufs.interpolators[w], factor)
+        interpolate_mapmuladd!(bufs.psf_buffer, mono_psf_field_block, bufs.interpolators[w], factor, identity, abs2)
     end
 end
 

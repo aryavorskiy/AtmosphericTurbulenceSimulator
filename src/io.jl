@@ -28,11 +28,15 @@ function write_batch!(bd::BufferedDataset{<:AbstractArray}, j, batch)
     batch_len = size(batch, 3)
     dset_len = size(bd.dataset, 3)::Int
     j1 = (j - 1) * batch_len + 1
+    j1 > dset_len && throw(BoundsError(bd.dataset, (1, 1, j1)))
     if dset_len > j * batch_len
-        bd.dataset[:, :, j1:j1 + batch_len - 1] .= batch
+        axes_to = (axes(bd.dataset, 1), axes(bd.dataset, 2), j1:j1 + batch_len - 1)
+        axes_from = axes(batch)
     else
-        bd.dataset[:, :, j1:end] .= @view batch[:, :, 1:dset_len - j1 + 1]
+        axes_to = (axes(bd.dataset, 1), axes(bd.dataset, 2), j1:dset_len)
+        axes_from = (axes(batch, 1), axes(batch, 2), 1:dset_len - j1 + 1)
     end
+    copyto!(bd.dataset, CartesianIndices(axes_to), batch, CartesianIndices(axes_from))
 end
 write_batch!(::BufferedDataset{Nothing}, _, _) = nothing
 

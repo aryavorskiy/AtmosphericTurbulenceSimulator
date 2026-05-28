@@ -84,5 +84,12 @@
         img_e1 = res_e.images
         img_e2 = simulate_images(SavedPhases(res_e.phases; wind_velocity=(1, 1)), img_spec2, n=10).images
         @test img_e1 == img_e2
+
+        img_e3 = simulate_images(SavedPhases(res_e.phases; wind_velocity=(1, 1)), img_spec2, n=11, batch=7).images
+        @test img_e1 == img_e3[:, :, 1:10]  # Should match first 10 frames, even with different wind velocity
+        @test all(isnan, img_e3[:, :, 11])  # Last frame should be NaN due to batch size limit
+
+        @test_throws ArgumentError simulate_images(SavedPhases(res_e.phases; wind_velocity=(2, 2)), img_spec2, n=10)
+        @test_throws BoundsError simulate_images(SavedPhases(res_e.phases; wind_velocity=(1, 1)), img_spec2, n=20, batch=7)
     end
 end
