@@ -88,7 +88,7 @@ scales both turbulence strength and diffraction with wavelength, while assuming 
 itself is achromatic.
 
 Long exposures are also supported by averaging multiple phase screens together. To simulate a long exposure, 
-you will need non-zero exposure time and a defined wind velocity in the atmosphere model. See [Examples#Variable-Exposure-Times](@ref) for details.
+you will need non-zero exposure time and a defined wind velocity in the atmosphere model. See [this example](@ref "Variable exposure times") for details.
 
 !!! note
     The sampled-bandpass model is most appropriate for narrow bands where the telescope pupil does
