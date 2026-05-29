@@ -4,15 +4,14 @@ AtmosphericTurbulenceSimulator.jl simulates atmospheric turbulence effects in te
 It provides tools for sampling turbulent phase screens, propagating them through a pupil model, and
 generating image sequences for point sources, binary systems, and extended sky images.
 
-The package is designed for simulation runs that need:
-
-- Kolmogorov phase screens parameterized by the Fried parameter ``r_0``.
-- Harding interpolation for efficient high-resolution phase generation (see [Harding et al. 1999](https://doi.org/10.1364/AO.38.002161)).
-- Circular or user-defined aperture functions.
-- Monochromatic or sampled-bandpass imaging.
+Features include:
+- High-fidelity phase screen sampling with Kolmogorov statistics.
+- Flexible true-sky models: point sources, binary systems, user-defined images.
 - Photon-counting readout with optional background.
+- Non-monochromatic filters with wavelength-dependent turbulence and diffraction.
+- Long-exposure simulations with wind-driven phase screen evolution.
 - HDF5 output for large batches, or in-memory arrays for interactive work.
-- CPU multi-threading and device-backed arrays such as CUDA arrays.
+- CPU multi-threading and CUDA support.
 
 ## Installation
 
@@ -88,7 +87,8 @@ scales both turbulence strength and diffraction with wavelength, while assuming 
 itself is achromatic.
 
 Long exposures are also supported by averaging multiple phase screens together. To simulate a long exposure, 
-you will need non-zero exposure time and a defined wind velocity in the atmosphere model. See [this example](@ref "Variable exposure times") for details.
+you will need non-zero exposure time and a defined wind velocity in the atmosphere model. See 
+[this example](@ref "Variable exposure times") for details.
 
 !!! note
     The sampled-bandpass model is most appropriate for narrow bands where the telescope pupil does
@@ -98,22 +98,31 @@ you will need non-zero exposure time and a defined wind velocity in the atmosphe
 
 ### Backends
 
-Julia multi-threading can improve large CPU simulations:
+This toolchain is compatible with CPU multi-threading. By default, it uses all available threads. 
+To control the number of threads, set the `JULIA_NUM_THREADS` environment variable before starting 
+Julia, or start Julia with the `--threads` flag:
 
 ```bash
-julia --threads=auto
+julia --threads=auto    # use all available cores
 ```
 
-GPU execution is selected by passing a device adapter, for example `deviceadapter=CuArray` after
-loading CUDA.jl:
+Use [`MultiThreaded`](@ref) for more fine-grained control over the CPU threading behavior, such as 
+specifying the number of threads or the array type used for computations:
+
+```julia
+simulate_images(atm, img_spec; n=100_000, file="simulation.h5", deviceadapter=MultiThreaded(16))
+```
+
+GPU execution is also supported. To use GPU arrays, pass the appropriate device adapter, for example 
+`deviceadapter=CuArray`. Note that this requires CUDA.jl and a compatible NVIDIA GPU.
 
 ```julia
 using CUDA
-simulate_images(PointSource(), atm, img_spec; n=100_000, file="simulation.h5", deviceadapter=CuArray)
+simulate_images(atm, img_spec; n=100_000, file="simulation.h5", deviceadapter=CuArray)
 ```
 
 !!! warning
-    CUDA.jl is the only GPU backend currently tested. Other Julia GPU array backends may work if
+    CUDA.jl is the only GPU backend tested so far. Other Julia GPU array backends may work if
     they provide the required array operations and FFT support.
 
 ### Batch Size
