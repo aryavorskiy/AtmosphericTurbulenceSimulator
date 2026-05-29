@@ -383,24 +383,6 @@ function _compute_images!(readout_to, opt_buffer::OpticalBuffers, spec::ImagingS
     apply_truesky!(opt_buffer, true_sky)
     readout!(readout_to, opt_buffer.psf_buffer, spec.photon_count, psf_norm * length(offsets))
 end
-struct ImgBufSerial{BT<:OpticalBuffers, ST<:ImagingSpec, FT<:Real, OT}
-    opt_buffer::BT
-    spec::ST
-    psf_norm::FT
-    offsets::Vector{OT}
-end
-image_size(img_buf::ImgBufSerial) = image_size(img_buf.opt_buffer)
-image_type(img_buf::ImgBufSerial) = image_type(img_buf.opt_buffer)
-function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int, deviceadapter) where T
-    img_spec_adapt = adapt(deviceadapter, img_spec)
-    return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec), batch, deviceadapter),
-        ImgBufSerial(OpticalBuffers(T, img_spec_adapt, batch), img_spec_adapt, psf_norm(img_spec), long_exp_offsets(atm_spec, img_spec))
-end
-function compute_images!(img_buf::ImgBufSerial, phases, true_sky)
-    _compute_images!(img_buf.opt_buffer.read_buffer, img_buf.opt_buffer, img_buf.spec,
-        phases, true_sky, img_buf.offsets, img_buf.psf_norm)
-    return img_buf.opt_buffer.read_buffer
-end
 
 """
     MultiThreaded([AT=Array, ]nworkers=Threads.nthreads())
@@ -410,11 +392,13 @@ underlying array type; `nworkers` controls how many threads are used (defaults t
 `Threads.nthreads()`).
 """
 struct MultiThreaded{AT}
+    adapter::AT
     nworkers::Int
 end
-MultiThreaded(::Type{AT}, nworkers::Int=Threads.nthreads()) where {AT} = MultiThreaded{AT}(nworkers)
-MultiThreaded(nworkers::Int=Threads.nthreads()) = MultiThreaded{identity}(nworkers)
-Adapt.adapt_storage(::MultiThreaded{AT}, x) where {AT} = Adapt.adapt_storage(AT, x)
+MultiThreaded(::Type{AT}, nworkers::Int) where {AT} = MultiThreaded(Val(AT), nworkers)
+MultiThreaded(adapter) = MultiThreaded(adapter, Threads.nthreads())
+MultiThreaded(nworkers::Int=Threads.nthreads()) = MultiThreaded(identity, nworkers)
+Adapt.adapt_storage(am::MultiThreaded{AT}, x) where {AT} = Adapt.adapt_storage(am.adapter, x)
 struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT,CT}
     opt_bufs::Vector{BT}
     chunk_ranges::Vector{CT}
@@ -428,21 +412,32 @@ image_type(img_buf::ImgBufParallel) = eltype(img_buf.img_array)
 function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int, adapter::MultiThreaded) where T
     nbufs = min(adapter.nworkers, batch)
     chunk_ranges = collect(chunks(1:batch; n=nbufs))
-    opt_buffer1 = OpticalBuffers(T, img_spec, length(chunk_ranges[1]))
+    img_spec_adapt = adapt(adapter, img_spec)
+    opt_buffer1 = OpticalBuffers(T, img_spec_adapt, length(chunk_ranges[1]))
     img_array = similar(opt_buffer1.read_buffer, image_size(img_spec)..., batch)
     opt_bufs = Array{typeof(opt_buffer1)}(undef, nbufs)
     opt_bufs[1] = opt_buffer1
     Threads.@threads for i in 2:nbufs
-        opt_bufs[i] = OpticalBuffers(T, img_spec, length(chunk_ranges[i]))
+        opt_bufs[i] = OpticalBuffers(T, img_spec_adapt, length(chunk_ranges[i]))
     end
     return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec), batch, adapter),
-        ImgBufParallel(opt_bufs, chunk_ranges, img_spec, psf_norm(img_spec), long_exp_offsets(atm_spec, img_spec), img_array)
+        ImgBufParallel(opt_bufs, chunk_ranges, img_spec_adapt, psf_norm(img_spec),
+            long_exp_offsets(atm_spec, img_spec), img_array)
 end
+prepare_buffers(type, atm_spec, img_spec, batch, A) =
+    prepare_buffers(type, atm_spec, img_spec, batch, MultiThreaded(A))
+prepare_buffers(type, atm_spec, img_spec, batch, ::Type{AT}) where {AT<:Array} =
+    prepare_buffers(type, atm_spec, img_spec, batch, MultiThreaded(AT, 1))
 function compute_images!(img_buf::ImgBufParallel, phases, true_sky)
-    Threads.@threads for i in eachindex(img_buf.opt_bufs)
-        chunk_range = img_buf.chunk_ranges[i]
-        _compute_images!(view(img_buf.img_array, :, :, chunk_range), img_buf.opt_bufs[i], img_buf.spec,
-            view(phases, :, :, chunk_range), true_sky, img_buf.offsets, img_buf.psf_norm)
+    if length(img_buf.chunk_ranges) == 1
+        _compute_images!(img_buf.img_array, only(img_buf.opt_bufs), img_buf.spec, phases,
+            true_sky, img_buf.offsets, img_buf.psf_norm)
+    else
+        Threads.@threads for i in eachindex(img_buf.opt_bufs)
+            chunk_range = img_buf.chunk_ranges[i]
+            _compute_images!(view(img_buf.img_array, :, :, chunk_range), img_buf.opt_bufs[i], img_buf.spec,
+                view(phases, :, :, chunk_range), true_sky, img_buf.offsets, img_buf.psf_norm)
+        end
     end
     return img_buf.img_array
 end

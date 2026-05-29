@@ -103,13 +103,14 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
         @test eltype(ts_img_f32.true_sky_fft) == ComplexF32
     end
 
-    @testset "ImgBufSerial & ImgBufParallel" begin
+    @testset "ImgBufParallel" begin
         ap = CircularAperture((16, 16))
         img_spec = ImagingSpec(ap, PhotonCount(1e6, 100))
         atm = SingleLayer(5.0)
 
         img_buf_serial = prepare_buffers(Int32, atm, img_spec, 5, Array)[2]
-        @test img_buf_serial isa AtmosphericTurbulenceSimulator.ImgBufSerial
+        @test img_buf_serial isa AtmosphericTurbulenceSimulator.ImgBufParallel
+        @test length(img_buf_serial.opt_bufs) == 1
         @test length(img_buf_serial.offsets) == 1
         @test img_buf_serial.offsets[1].can_ff
 
