@@ -205,21 +205,24 @@ function harding_upsample!(to, from, noise_std)
 end
 
 """
-    MultiThreaded([AT=Array, ]nworkers=Threads.nthreads())
+    MultiThreaded([adapter, nworkers])
 
-Device adapter that enables multi-threaded phase generation and imaging on CPU. `AT` is the
-underlying array type; `nworkers` controls how many threads are used (defaults to
-`Threads.nthreads()`).
+Device adapter that enables multi-threaded phase generation and imaging on CPU.
+
+# Arguments
+- `adapter`: optional storage adapter for internal buffers.
+- `nworkers`: number of threads to use (default: `Threads.nthreads()` if `adapter` is not
+    provided, otherwise 1).
 """
 struct MultiThreaded{AT}
     adapter::AT
     nworkers::Int
 end
 MultiThreaded(::Type{AT}, nworkers::Int) where {AT} = MultiThreaded(Val(AT), nworkers)
-MultiThreaded(adapter) = MultiThreaded(adapter, Threads.nthreads())
-MultiThreaded(::Type{AT}) where {AT<:Array} = MultiThreaded(Val(AT), 1)
+MultiThreaded(adapter) = MultiThreaded(adapter, 1)
 MultiThreaded(nworkers::Int=Threads.nthreads()) = MultiThreaded(identity, nworkers)
 Adapt.adapt_storage(am::MultiThreaded{AT}, x) where {AT} = Adapt.adapt_storage(am.adapter, x)
+Adapt.adapt_storage(::MultiThreaded{Val{AT}}, x) where {AT} = Adapt.adapt_storage(AT, x)
 
 struct HardingInterpolator{BT,HBT,AT,CT}
     phs_buf::BT

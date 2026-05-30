@@ -20,7 +20,7 @@ end
 # f(params, N) — version-specific simulate_images call; writes to TMPFILE
 # cases        — iterable of name => params pairs
 function run_benchmarks(f, outfile, cases, ns)
-    println("[$VERSION_TAG] Warming up (N=$N_WARMUP)…")
+    println("[$VERSION_TAG] Warming up (N=$(ns[1]))…")
     f(cases[1][2], ns[1])   # warmup run to compile the function
     isfile(TMPFILE) && rm(TMPFILE, force=true)
 
