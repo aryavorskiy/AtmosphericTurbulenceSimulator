@@ -384,21 +384,6 @@ function _compute_images!(readout_to, opt_buffer::OpticalBuffers, spec::ImagingS
     readout!(readout_to, opt_buffer.psf_buffer, spec.photon_count, psf_norm * length(offsets))
 end
 
-"""
-    MultiThreaded([AT=Array, ]nworkers=Threads.nthreads())
-
-Device adapter that enables multi-threaded phase generation and imaging on CPU. `AT` is the
-underlying array type; `nworkers` controls how many threads are used (defaults to
-`Threads.nthreads()`).
-"""
-struct MultiThreaded{AT}
-    adapter::AT
-    nworkers::Int
-end
-MultiThreaded(::Type{AT}, nworkers::Int) where {AT} = MultiThreaded(Val(AT), nworkers)
-MultiThreaded(adapter) = MultiThreaded(adapter, Threads.nthreads())
-MultiThreaded(nworkers::Int=Threads.nthreads()) = MultiThreaded(identity, nworkers)
-Adapt.adapt_storage(am::MultiThreaded{AT}, x) where {AT} = Adapt.adapt_storage(am.adapter, x)
 struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT,CT}
     opt_bufs::Vector{BT}
     chunk_ranges::Vector{CT}
@@ -426,8 +411,6 @@ function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int,
 end
 prepare_buffers(type, atm_spec, img_spec, batch, A) =
     prepare_buffers(type, atm_spec, img_spec, batch, MultiThreaded(A))
-prepare_buffers(type, atm_spec, img_spec, batch, ::Type{AT}) where {AT<:Array} =
-    prepare_buffers(type, atm_spec, img_spec, batch, MultiThreaded(AT, 1))
 function compute_images!(img_buf::ImgBufParallel, phases, true_sky)
     if length(img_buf.chunk_ranges) == 1
         _compute_images!(img_buf.img_array, only(img_buf.opt_bufs), img_buf.spec, phases,

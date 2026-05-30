@@ -1,4 +1,4 @@
-using LinearAlgebra, HDF5, Random, Adapt
+using LinearAlgebra, HDF5, Random, Adapt, ChunkSplitters
 
 abstract type AtmosphereSpec{T} end
 
@@ -29,6 +29,23 @@ function kolmogorov_covmat(W::AbstractMatrix)
 end
 kolmogorov_covmat(::Type{T}, sz::NTuple{2,Int}) where T = kolmogorov_covmat(ones(T, sz))
 kolmogorov_covmat(sz::NTuple{2,Int}) = kolmogorov_covmat(Float64, sz)
+
+"""
+    MultiThreaded([AT=Array, ]nworkers=Threads.nthreads())
+
+Device adapter that enables multi-threaded phase generation and imaging on CPU. `AT` is the
+underlying array type; `nworkers` controls how many threads are used (defaults to
+`Threads.nthreads()`).
+"""
+struct MultiThreaded{AT}
+    adapter::AT
+    nworkers::Int
+end
+MultiThreaded(::Type{AT}, nworkers::Int) where {AT} = MultiThreaded(Val(AT), nworkers)
+MultiThreaded(adapter) = MultiThreaded(adapter, Threads.nthreads())
+MultiThreaded(::Type{AT}) where {AT<:Array} = MultiThreaded(Val(AT), 1)
+MultiThreaded(nworkers::Int=Threads.nthreads()) = MultiThreaded(identity, nworkers)
+Adapt.adapt_storage(am::MultiThreaded{AT}, x) where {AT} = Adapt.adapt_storage(am.adapter, x)
 
 const EigenType = Union{Tuple{<:Any,<:Any}, Eigen}
 struct KarhunenLoeveBuffers{MT}
@@ -129,47 +146,76 @@ function prepare_phasebuffers(spec::SingleLayer, plate_size::NTuple{2,Int}, batc
     covar .*= low_r₀^(-5/3)
     E, U = eigen(Symmetric(covar))
     kl = KarhunenLoeveBuffers(low_size, (E, U), batch)
-    return HardingInterpolator(kl, kl.out_buffer, low_r₀, harding)
+    return HardingInterpolator(kl, low_r₀, harding, deviceadapter)
 end
 
-struct HardingInterpolator{BT,NAT}
-    base::BT
+struct HardingBuffers{NAT}
     out_bufs::NAT
     noise_std::Float64
-    crop_size::NTuple{2,Int}
 end
-function HardingInterpolator(base, array, r0::Number, hspec::HardingSpec)
+
+struct HardingInterpolator{BT,HBT,AT,CT}
+    base::BT
+    harding_bufs::Vector{HBT}
+    chunk_ranges::Vector{CT}
+    out_array::AT
+end
+function HardingInterpolator(base, r0::Number, hspec::HardingSpec, adapter::MultiThreaded)
     low_size = hspec.size_from
     any(low_size .≤ 11) && throw(ArgumentError("Dimensions must be greater than 11"))
-    bufs = map(1:hspec.nsteps) do i
-        lsz = low_size
-        for _ in 1:i
-            lsz = 2 .* lsz .- 11
+    T = phase_type(base)
+    batch = batch_length(base)
+    nbufs = min(adapter.nworkers, batch)
+    chunk_ranges = collect(chunks(1:batch; n=nbufs))
+    noise_std = sqrt(0.5265 / r0^(5/3))
+    harding_bufs = map(chunk_ranges) do chunk_range
+        bufs = map(1:hspec.nsteps) do i
+            lsz = low_size
+            for _ in 1:i
+                lsz = 2 .* lsz .- 11
+            end
+            Adapt.adapt_storage(adapter, zeros(T, (lsz .+ 10)..., length(chunk_range)))
         end
-        similar(array, (lsz .+ 10)..., batch_length(base))
+        HardingBuffers(bufs, noise_std)
     end
-    return HardingInterpolator(base, bufs, sqrt(0.5265 / r0^(5/3)), hspec.size_to)
+    out_array = Adapt.adapt_storage(adapter, zeros(T, hspec.size_to..., batch))
+    return HardingInterpolator(base, harding_bufs, chunk_ranges, out_array)
 end
-plate_size(sampler::HardingInterpolator) = sampler.crop_size
+HardingInterpolator(base, r0::Number, hspec::HardingSpec, adapter) =
+    HardingInterpolator(base, r0, hspec, MultiThreaded(adapter))
+plate_size(sampler::HardingInterpolator) = size(sampler.out_array)[1:2]
 batch_length(sampler::HardingInterpolator) = batch_length(sampler.base)
-phase_type(sampler::HardingInterpolator) = phase_type(sampler.base)
+phase_type(sampler::HardingInterpolator) = eltype(sampler.out_array)
+
+function harding_interpolate!(to, hbuf::HardingBuffers, from)
+    N = length(hbuf.out_bufs)
+    harding_upsample!(hbuf.out_bufs[1], from, hbuf.noise_std)
+    for i in 2:N
+        prev_buffer = hbuf.out_bufs[i - 1]
+        harding_upsample!(hbuf.out_bufs[i], @view(prev_buffer[6:end-5, 6:end-5, :]),
+            hbuf.noise_std / 2^(5/6 * (i-1)))
+    end
+    out_buffer = hbuf.out_bufs[N]
+    crop_offset = (size(out_buffer)[1:2] .- size(to)[1:2]) .÷ 2
+    copyto!(to, view(out_buffer,
+        crop_offset[1] + 1:crop_offset[1] + size(to, 1),
+        crop_offset[2] + 1:crop_offset[2] + size(to, 2), :))
+end
 
 function samplephases!(harding::HardingInterpolator)
     low = samplephases!(harding.base)
-    N = length(harding.out_bufs)
-    N == 0 && return @view low[1:end, 1:end, :] # Ensure the same view type is returned
-    harding_upsample!(harding.out_bufs[1], low, harding.noise_std)
-    for i in 2:N
-        prev_buffer = harding.out_bufs[i - 1]
-        harding_upsample!(harding.out_bufs[i], @view(prev_buffer[6:end-5, 6:end-5, :]),
-            harding.noise_std / 2^(5/6 * (i-1)))
+    N = length(first(harding.harding_bufs).out_bufs)
+    N == 0 && return low
+    if length(harding.harding_bufs) == 1
+        harding_interpolate!(harding.out_array, only(harding.harding_bufs), low)
+    else
+        Threads.@threads for i in eachindex(harding.harding_bufs)
+            chunk = harding.chunk_ranges[i]
+            harding_interpolate!(view(harding.out_array, :, :, chunk),
+                harding.harding_bufs[i], view(low, :, :, chunk))
+        end
     end
-    out_buffer = harding.out_bufs[N]
-    crop_offset = (size(out_buffer)[1:2] .- harding.crop_size) .÷ 2
-    return @view out_buffer[
-        crop_offset[1] + 1:crop_offset[1] + harding.crop_size[1],
-        crop_offset[2] + 1:crop_offset[2] + harding.crop_size[2],
-        :]
+    return harding.out_array
 end
 function harding_upsample!(to, from, noise_std)
     c_d = 0.3198
