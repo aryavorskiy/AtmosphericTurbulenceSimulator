@@ -13,15 +13,32 @@ Representation of a spectral filter used by the imaging pipeline.
 - `intensities`: vector of relative intensities at each sampled wavelength. If not provided,
   equal weights are assumed.
 """
-struct FilterSpec{T}
-    wavelengths::Vector{T}
-    intensities::Vector{T}
+struct FilterSpec{T1,T2}
+    wavelengths::Vector{T1}
+    intensities::Vector{T2}
 end
-FilterSpec(wavelengths::AbstractVector{T1},
-    intensities::AbstractVector{T2}=ones(Int, length(wavelengths))) where {T1,T2} =
-    FilterSpec{promote_type(T1, T2)}(wavelengths, intensities)
+FilterSpec(wavelengths::AbstractVector) = FilterSpec(wavelengths, ones(Int, length(wavelengths)))
 MonoFilterSpec(::Type{T}=Int) where T = FilterSpec([DEFAULT_WAVELEN], [1])
 nwavel(fs::FilterSpec) = length(fs.wavelengths)
+
+"""
+    FilterSpec(base_wavelength; bandwidth[, tcenter=1, tedge=1, npts=7])
+
+# Arguments
+- `base_wavelength`: central wavelength for the filter (same units as `wavelengths`).
+
+# Keyword Arguments
+- `bandwidth`: total width of the filter bandpass in wavelength units.
+- `tcenter`: relative intensity at the center wavelength (default 1).
+- `tedge`: relative intensity at the edges of the bandpass (default 1).
+"""
+function FilterSpec(base_wavelength::Real=DEFAULT_WAVELEN; bandwidth, tcenter=1, tedge=1, npts=7)
+    wavelengths = range(base_wavelength - bandwidth / 2, base_wavelength + bandwidth / 2, length=npts)
+    intensities = range(-pi/2, pi/2, length=npts) .|> x -> cos(x) * (tcenter - tedge) + tedge
+    return FilterSpec(wavelengths, intensities)
+end
+Base.convert(::Type{FilterSpec{T}}, bspec::FilterSpec) where T<:Real =
+    FilterSpec{T}(bspec.wavelengths, bspec.intensities)
 
 struct BilinearInterpolator{IT,VT}
     ix::IT
@@ -69,25 +86,6 @@ function interpolate_mapmuladd!(to::AbstractArray, from::AbstractArray, interp::
     end
     return to
 end
-
-"""
-    FilterSpec(base_wavelength; bandwidth[, tcenter=1, tedge=1, npts=7])
-
-# Arguments
-- `base_wavelength`: central wavelength for the filter (same units as `wavelengths`).
-
-# Keyword Arguments
-- `bandwidth`: total width of the filter bandpass in wavelength units.
-- `tcenter`: relative intensity at the center wavelength (default 1).
-- `tedge`: relative intensity at the edges of the bandpass (default 1).
-"""
-function FilterSpec(base_wavelength::Real=DEFAULT_WAVELEN; bandwidth, tcenter=1, tedge=1, npts=7)
-    wavelengths = range(base_wavelength - bandwidth / 2, base_wavelength + bandwidth / 2, length=npts)
-    intensities = range(-pi/2, pi/2, length=npts) .|> x -> cos(x) * (tcenter - tedge) + tedge
-    return FilterSpec(wavelengths, intensities)
-end
-Base.convert(::Type{FilterSpec{T}}, bspec::FilterSpec) where T<:Real =
-    FilterSpec{T}(bspec.wavelengths, bspec.intensities)
 
 """
     PhotonCount(nphotons[, background])
