@@ -6,23 +6,21 @@ using LinearAlgebra, FFTW, Distributions, HDF5, ProgressMeter, Adapt, ChunkSplit
 Representation of a spectral filter used by the imaging pipeline.
 
 ---
-    FilterSpec(base_wavelength, wavelengths[, intensities])
+    FilterSpec(wavelengths[, intensities])
 
 # Arguments
-- `base_wavelength`: central wavelength for the filter.
 - `wavelengths`: vector of sampled wavelengths within the filter bandpass.
 - `intensities`: vector of relative intensities at each sampled wavelength. If not provided,
   equal weights are assumed.
 """
 struct FilterSpec{T}
-    base_wavelength::T
     wavelengths::Vector{T}
     intensities::Vector{T}
 end
-FilterSpec(base_wavelength::T1, wavelengths::AbstractVector{T2},
-    intensities::AbstractVector{T3}=ones(Int, length(wavelengths))) where {T1,T2,T3} =
-    FilterSpec{promote_type(T1, T2, T3)}(base_wavelength, wavelengths, intensities)
-MonoFilterSpec(::Type{T}=Int) where T = FilterSpec{T}(1, [1], [1])
+FilterSpec(wavelengths::AbstractVector{T1},
+    intensities::AbstractVector{T2}=ones(Int, length(wavelengths))) where {T1,T2} =
+    FilterSpec{promote_type(T1, T2)}(wavelengths, intensities)
+MonoFilterSpec(::Type{T}=Int) where T = FilterSpec([DEFAULT_WAVELEN], [1])
 nwavel(fs::FilterSpec) = length(fs.wavelengths)
 
 struct BilinearInterpolator{IT,VT}
@@ -83,13 +81,13 @@ end
 - `tcenter`: relative intensity at the center wavelength (default 1).
 - `tedge`: relative intensity at the edges of the bandpass (default 1).
 """
-function FilterSpec(base_wavelength::Real; bandwidth, tcenter=1, tedge=1, npts=7)
+function FilterSpec(base_wavelength::Real=DEFAULT_WAVELEN; bandwidth, tcenter=1, tedge=1, npts=7)
     wavelengths = range(base_wavelength - bandwidth / 2, base_wavelength + bandwidth / 2, length=npts)
     intensities = range(-pi/2, pi/2, length=npts) .|> x -> cos(x) * (tcenter - tedge) + tedge
-    return FilterSpec(base_wavelength, wavelengths, intensities)
+    return FilterSpec(wavelengths, intensities)
 end
 Base.convert(::Type{FilterSpec{T}}, bspec::FilterSpec) where T<:Real =
-    FilterSpec{T}(bspec.base_wavelength, bspec.wavelengths, bspec.intensities)
+    FilterSpec{T}(bspec.wavelengths, bspec.intensities)
 
 """
     PhotonCount(nphotons[, background])
@@ -260,7 +258,7 @@ image_size(bufs::OpticalBuffers) = size(bufs.aperture_buffer)[1:2]
 image_type(bufs::OpticalBuffers) = eltype(bufs.read_buffer)
 batch_length(bufs::OpticalBuffers) = size(bufs.aperture_buffer, 3)
 
-function OpticalBuffers(::Type{T}, img_spec::ImagingSpec{NT}, batch::Int) where {T, NT}
+function OpticalBuffers(::Type{T}, img_spec::ImagingSpec{NT}, scales, batch::Int) where {T, NT}
     buf1 = similar(img_spec.aperture, complex(NT), img_spec.img_size..., batch)
     buf2 = similar(buf1)
     psf_buffer = similar(buf1, NT, img_spec.img_size..., batch)
@@ -268,8 +266,7 @@ function OpticalBuffers(::Type{T}, img_spec::ImagingSpec{NT}, batch::Int) where 
     if nwavel(img_spec.filter_spec) == 1
         interpolators = [BilinearShift(psf_buffer, (0, 0))]
     else
-        interpolators = [BilinearScale(psf_buffer, img_spec.filter_spec.wavelengths[w] /
-        img_spec.filter_spec.base_wavelength) for w in 1:nwavel(img_spec.filter_spec)]
+        interpolators = [BilinearScale(psf_buffer, scale) for scale in scales]
     end
     return OpticalBuffers(buf1, buf2, psf_buffer, read_buffer, plan_fft(buf1, (1, 2)), interpolators)
 end
@@ -283,12 +280,10 @@ end
 write_phases!(bufs::OpticalBuffers, phases, img_spec::ImagingSpec, offset, phs_factor) =
     write_phases!(bufs.focal_buffer, phases, img_spec.aperture, offset, phs_factor)
 
-function phases_to_psf!(bufs::OpticalBuffers, img_spec::ImagingSpec, w)
+function phases_to_psf!(bufs::OpticalBuffers, interpolator::BilinearInterpolator, psf_factor)
     mul!(bufs.aperture_buffer, bufs.fftplan, bufs.focal_buffer)
     fftshift!(bufs.focal_buffer, bufs.aperture_buffer, (1, 2))
-    scale = img_spec.filter_spec.wavelengths[w] / img_spec.filter_spec.base_wavelength
-    factor = img_spec.filter_spec.intensities[w] / scale^2
-    interpolate_mapmuladd!(bufs.psf_buffer, bufs.focal_buffer, bufs.interpolators[w], factor, identity, abs2)
+    interpolate_mapmuladd!(bufs.psf_buffer, bufs.focal_buffer, interpolator, psf_factor, identity, abs2)
 end
 
 function readout!(dst::AbstractArray, img::AbstractArray, pc::PhotonCount, psf_norm)
@@ -367,24 +362,25 @@ function long_exp_offsets(atm_spec::AtmosphereSpec, img_spec::ImagingSpec)
     mins = minimum(first, offset_list), minimum(last, offset_list)
     return [BilinearShift(img_spec.aperture, offset .- mins) for offset in offset_list]
 end
-function compute_images!(readout_to, opt_buffer::OpticalBuffers, spec::ImagingSpec, phases, true_sky, offsets, psf_norm)
+function compute_images!(readout_to, opt_buffer::OpticalBuffers, spec::ImagingSpec, phs_factors, phases, true_sky, offsets, psf_norm)
     fill!(opt_buffer.psf_buffer, 0)
-    for offset in offsets, w in 1:nwavel(spec.filter_spec)
-        phs_factor = spec.filter_spec.wavelengths[w] / spec.filter_spec.base_wavelength
-        write_phases!(opt_buffer, phases, spec, offset, phs_factor)
-        phases_to_psf!(opt_buffer, spec, w)
+    filter = spec.filter_spec
+    for offset in offsets, w in 1:nwavel(filter)
+        write_phases!(opt_buffer, phases, spec, offset, phs_factors[w])
+        phases_to_psf!(opt_buffer, opt_buffer.interpolators[w], filter.intensities[w] / phs_factors[w]^2)
     end
     apply_truesky!(opt_buffer, true_sky)
     readout!(readout_to, opt_buffer.psf_buffer, spec.photon_count, psf_norm * length(offsets))
 end
 
-struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT,CT}
+struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT,CT,VT}
     opt_bufs::Vector{BT}
     chunk_ranges::Vector{CT}
     spec::ST
     psf_norm::FT
     offsets::Vector{OT}
     img_array::AT
+    phs_factors::VT
 end
 image_size(img_buf::ImgBufParallel) = image_size(img_buf.opt_bufs[1])
 image_type(img_buf::ImgBufParallel) = eltype(img_buf.img_array)
@@ -392,28 +388,30 @@ function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int,
     nbufs = min(adapter.nworkers, batch)
     chunk_ranges = collect(chunks(1:batch; n=nbufs))
     img_spec_adapt = adapt(adapter, img_spec)
-    opt_buffer1 = OpticalBuffers(T, img_spec_adapt, length(chunk_ranges[1]))
+    phs_factors = atm_spec.base_wavelength ./ img_spec.filter_spec.wavelengths
+    opt_buffer1 = OpticalBuffers(T, img_spec_adapt, phs_factors, length(chunk_ranges[1]))
     img_array = similar(opt_buffer1.read_buffer, image_size(img_spec)..., batch)
     opt_bufs = Array{typeof(opt_buffer1)}(undef, nbufs)
     opt_bufs[1] = opt_buffer1
     Threads.@threads for i in 2:nbufs
-        opt_bufs[i] = OpticalBuffers(T, img_spec_adapt, length(chunk_ranges[i]))
+        opt_bufs[i] = OpticalBuffers(T, img_spec_adapt, phs_factors, length(chunk_ranges[i]))
     end
     return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec), batch, adapter),
         ImgBufParallel(opt_bufs, chunk_ranges, img_spec_adapt, psf_norm(img_spec),
-            long_exp_offsets(atm_spec, img_spec), img_array)
+            long_exp_offsets(atm_spec, img_spec), img_array, phs_factors)
 end
 prepare_buffers(type, atm_spec, img_spec, batch, A) =
     prepare_buffers(type, atm_spec, img_spec, batch, MultiThreaded(A))
 function compute_images!(img_buf::ImgBufParallel, phases, true_sky)
     if length(img_buf.chunk_ranges) == 1
-        compute_images!(img_buf.img_array, only(img_buf.opt_bufs), img_buf.spec, phases,
-            true_sky, img_buf.offsets, img_buf.psf_norm)
+        compute_images!(img_buf.img_array, only(img_buf.opt_bufs), img_buf.spec,
+            img_buf.phs_factors, phases, true_sky, img_buf.offsets, img_buf.psf_norm)
     else
         Threads.@threads for i in eachindex(img_buf.opt_bufs)
             chunk_range = img_buf.chunk_ranges[i]
             compute_images!(view(img_buf.img_array, :, :, chunk_range), img_buf.opt_bufs[i], img_buf.spec,
-                view(phases, :, :, chunk_range), true_sky, img_buf.offsets, img_buf.psf_norm)
+                img_buf.phs_factors, view(phases, :, :, chunk_range),
+                true_sky, img_buf.offsets, img_buf.psf_norm)
         end
     end
     return img_buf.img_array

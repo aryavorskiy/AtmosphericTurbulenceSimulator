@@ -39,7 +39,6 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
 
     @testset "FilterSpec" begin
         filter = FilterSpec(500; bandwidth=100, npts=5)
-        @test filter.base_wavelength == 500
         @test filter.wavelengths == range(450, 550, length=5)
         @test filter.intensities == ones(5)
     end
@@ -74,7 +73,7 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
         # Test with filter
         filter = FilterSpec(500.0; bandwidth=100.0)
         img_spec_filter = ImagingSpec(ap, PhotonCount(1e6, 10); filter=FilterSpec(500.0; bandwidth=100.0))
-        @test img_spec_filter.filter_spec.base_wavelength == 500.0
+        @test img_spec_filter.filter_spec.wavelengths[end÷2+1] == 500.0
         @test img_spec_filter.photon_count.nphotons == 1e6
         @test img_spec_filter.photon_count.background == 10
 

@@ -1,5 +1,6 @@
 using LinearAlgebra, HDF5, Random, Adapt, ChunkSplitters
 
+const DEFAULT_WAVELEN = 550.0
 abstract type AtmosphereSpec{T} end
 
 """
@@ -111,13 +112,14 @@ An `AtmosphereSpec` that produces independent (uncorrelated) phase frames for ea
 The Harding interpolation follows "Fast simulation of a Kolmogorov phase screen"
 Cressida M. Harding, Rachel A. Johnston, and Richard G. Lane, APPLIED OPTICS Vol. 38, No. 11, April 1999
 """
-struct SingleLayer{T<:Real,T2<:Real,KT} <: AtmosphereSpec{T}
+struct SingleLayer{T<:Real,T2<:Real,T3<:Real,KT} <: AtmosphereSpec{T}
     r₀::T
-    wind_velocity::NTuple{2,T2}
+    base_wavelength::T2
+    wind_velocity::NTuple{2,T3}
     harding_kw::KT
 end
-function SingleLayer(r0::Real; wind_velocity=(0, 0), kw...)
-    SingleLayer(float(r0), wind_velocity, kw)
+function SingleLayer(r0::Real; base_wavelength=DEFAULT_WAVELEN, wind_velocity=(0, 0), kw...)
+    SingleLayer(float(r0), base_wavelength, wind_velocity, kw)
 end
 SingleLayer(::Type{T}, r0::Real; kw...) where T =
     SingleLayer(convert(T, r0); kw...)
@@ -289,14 +291,15 @@ available, an error is thrown, there is no guarantee what is in the tail of the 
 # Keyword Arguments
 - `wind_velocity`: two-component velocity used for long-exposure offsets in imaging simulations.
 """
-struct SavedPhases{T<:Real,D,WT} <: AtmosphereSpec{T}
+struct SavedPhases{T<:Real,D,WT,WL} <: AtmosphereSpec{T}
     dataset::D
     wind_velocity::NTuple{2,WT}
+    base_wavelength::WL
 end
-function SavedPhases(dataset; wind_velocity::NTuple{2,<:Real}=(0, 0))
+function SavedPhases(dataset; wind_velocity::NTuple{2,<:Real}=(0, 0), base_wavelength=DEFAULT_WAVELEN)
     T = eltype(dataset)
     WT = typeof(wind_velocity[1])
-    return SavedPhases{T,typeof(dataset),WT}(dataset, wind_velocity)
+    return SavedPhases{T,typeof(dataset),WT,typeof(base_wavelength)}(dataset, wind_velocity, base_wavelength)
 end
 
 mutable struct SavedPhaseBuffers{BDT, BT, CT}
