@@ -17,7 +17,8 @@ struct FilterSpec{T1,T2}
     wavelengths::Vector{T1}
     intensities::Vector{T2}
 end
-FilterSpec(wavelengths::AbstractVector) = FilterSpec(wavelengths, ones(Int, length(wavelengths)))
+FilterSpec(wavelengths::AbstractVector{T1}, intensities::AbstractVector{T2}=ones(length(wavelengths))) where {T1,T2} =
+    FilterSpec{T1,T2}(wavelengths, intensities)
 MonoFilterSpec(::Type{T}=Int) where T = FilterSpec([DEFAULT_WAVELEN], [1])
 nwavel(fs::FilterSpec) = length(fs.wavelengths)
 
@@ -37,8 +38,6 @@ function FilterSpec(base_wavelength::Real=DEFAULT_WAVELEN; bandwidth, tcenter=1,
     intensities = range(-pi/2, pi/2, length=npts) .|> x -> cos(x) * (tcenter - tedge) + tedge
     return FilterSpec(wavelengths, intensities)
 end
-Base.convert(::Type{FilterSpec{T}}, bspec::FilterSpec) where T<:Real =
-    FilterSpec{T}(bspec.wavelengths, bspec.intensities)
 
 struct BilinearInterpolator{IT,VT}
     ix::IT
@@ -183,12 +182,23 @@ Container for the imaging system configuration. It is defined by the telescope `
 source brightness via `photon_count`, an optional spectral `filter_spec`, and the output `img_size`.
 If `img_size` does not match the aperture’s Nyquist grid, the aperture is zero-padded accordingly.
 """
-struct ImagingSpec{T, AT<:AbstractMatrix{T}}
+struct ImagingSpec{T, T2, AT<:AbstractMatrix{T}, FST<:FilterSpec}
     aperture::AT
+    aperture_diameter::T2
     photon_count::PhotonCount{T}
-    filter_spec::FilterSpec{T}
+    filter_spec::FST
     exposure_spec::Exposure
     img_size::NTuple{2,Int}
+    function ImagingSpec(
+        aperture::AbstractMatrix{T},
+        aperture_diameter::Number,
+        photon_count::PhotonCount{T},
+        filter_spec::FilterSpec,
+        exposure_spec::Exposure,
+        img_size::NTuple{2,Int}) where T<:Real
+        new{T, typeof(aperture_diameter), typeof(aperture), typeof(filter_spec)}(
+            aperture, aperture_diameter, photon_count, filter_spec, exposure_spec, img_size)
+    end
 end
 
 """
@@ -203,6 +213,7 @@ Create an imaging system specification.
 - `photon_count`: `PhotonCount` instance describing the photon budget and background.
 
 # Keyword Arguments
+- `D`: aperture diameter (in the same units as ``r_0``).
 - `filter`: `FilterSpec` describing sampled wavelengths and their relative intensities.
   Defaults to a monochromatic filter.
 - `exposure`: a number or an [`Exposure`](@ref) instance describing the exposure time and number of
@@ -211,17 +222,14 @@ Create an imaging system specification.
   Defaults to 1. Ignored if `img_size` is provided.
 - `img_size`: explicit output image size `(nx, ny)`. If not provided, computed from aperture size
   and `nyquist_oversample`.
-- `nphotons` and `background`: alternative way to specify photon budget and background
-  when `photon_count` is not provided.
 """
 function ImagingSpec(aperture::AbstractMatrix{T}, photon_count::PhotonCount;
     filter::FilterSpec=MonoFilterSpec(), nyquist_oversample::Real=1,
-    exposure::Union{Exposure,Number}=0,
+    exposure::Union{Exposure,Number}=0, D=maximum(size(aperture)),
     img_size::NTuple{2,Int}=round.(Int, size(aperture) .* 2 .* nyquist_oversample)) where T<:Real
-    fs = convert(FilterSpec{T}, filter)
     pc = convert(PhotonCount{T}, photon_count)
     ex = exposure isa Number ? Exposure(exposure) : exposure
-    return ImagingSpec{T, typeof(aperture)}(aperture, pc, fs, ex, img_size)
+    return ImagingSpec(aperture, D, pc, filter, ex, img_size)
 end
 function ImagingSpec(aperture::AbstractMatrix; nphotons, background=nothing, kw...)
     Base.depwarn("`ImagingSpec(ap; nphotons=..., background=...)` is deprecated and will be \
@@ -237,10 +245,11 @@ ImagingSpec(::Type{T}, aperture::AbstractMatrix, args...; kw...) where T<:Real =
     ImagingSpec(convert.(T, aperture), args...; kw...)
 
 Adapt.adapt_structure(to, img_spec::ImagingSpec) =
-    ImagingSpec(Adapt.adapt_storage(to, img_spec.aperture), img_spec.photon_count,
-    img_spec.filter_spec, img_spec.exposure_spec, img_spec.img_size)
+    ImagingSpec(Adapt.adapt_storage(to, img_spec.aperture), img_spec.aperture_diameter,
+    img_spec.photon_count, img_spec.filter_spec, img_spec.exposure_spec, img_spec.img_size)
 plate_size(img_spec::ImagingSpec) = size(img_spec.aperture)
 image_size(img_spec::ImagingSpec) = img_spec.img_size
+ap_step(img_spec::ImagingSpec) = img_spec.aperture_diameter / maximum(plate_size(img_spec))
 psf_norm(img_spec::ImagingSpec) = sum(abs2, img_spec.aperture) * prod(img_spec.img_size) *
         sum(img_spec.filter_spec.intensities)
 
@@ -394,7 +403,8 @@ function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int,
     Threads.@threads for i in 2:nbufs
         opt_bufs[i] = OpticalBuffers(T, img_spec_adapt, phs_factors, length(chunk_ranges[i]))
     end
-    return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec), batch, adapter),
+    return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec),
+            ap_step(img_spec), batch, adapter),
         ImgBufParallel(opt_bufs, chunk_ranges, img_spec_adapt, psf_norm(img_spec),
             long_exp_offsets(atm_spec, img_spec), img_array, phs_factors)
 end

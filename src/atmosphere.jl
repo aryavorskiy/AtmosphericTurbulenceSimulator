@@ -121,17 +121,16 @@ end
 function SingleLayer(r0::Real; base_wavelength=DEFAULT_WAVELEN, wind_velocity=(0, 0), kw...)
     SingleLayer(float(r0), base_wavelength, wind_velocity, kw)
 end
-SingleLayer(::Type{T}, r0::Real; kw...) where T =
-    SingleLayer(convert(T, r0); kw...)
-function prepare_phasebuffers(spec::SingleLayer, plate_size::NTuple{2,Int}, batch::Int, deviceadapter)
+SingleLayer(::Type{T}, r0::Real; kw...) where T = SingleLayer(convert(T, r0); kw...)
+function prepare_phasebuffers(spec::SingleLayer, plate_size::NTuple{2,Int}, plate_step::Number, batch::Int, deviceadapter)
     harding = HardingSpec(plate_size; spec.harding_kw...)
     low_size = harding.size_from
-    low_r₀ = spec.r₀ / 2^harding.nsteps
-    covar = Adapt.adapt_storage(deviceadapter, kolmogorov_covmat(typeof(low_r₀), low_size))
-    covar .*= low_r₀^(-5/3)
+    low_r₀_px = Number(spec.r₀ / oftype(spec.r₀, plate_step)) / 2^harding.nsteps
+    covar = Adapt.adapt_storage(deviceadapter, kolmogorov_covmat(typeof(low_r₀_px), low_size))
+    covar .*= low_r₀_px^(-5/3)
     E, U = eigen(Symmetric(covar))
     kl = KarhunenLoeveBuffers(low_size, (E, U), batch)
-    return HardingInterpolator(kl, low_r₀, harding, deviceadapter)
+    return HardingInterpolator(kl, low_r₀_px, harding, deviceadapter)
 end
 
 struct HardingBuffers{NAT}
@@ -311,7 +310,8 @@ end
 plate_size(sampler::SavedPhaseBuffers) = size(sampler.out_array)[1:2]
 batch_length(sampler::SavedPhaseBuffers) = size(sampler.out_array, 3)
 phase_type(sampler::SavedPhaseBuffers) = eltype(sampler.out_array)
-function prepare_phasebuffers(spec::SavedPhases{T}, plate_size::NTuple{2,Int}, batch::Int, deviceadapter) where T
+function prepare_phasebuffers(spec::SavedPhases{T}, plate_size::NTuple{2,Int}, plate_step::Number,
+        batch::Int, deviceadapter) where T
     saved_size = size(spec.dataset)::NTuple{3,Int}
     saved_plate_size = saved_size[1:2]
     all(saved_plate_size .>= plate_size) || throw(ArgumentError(
