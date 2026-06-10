@@ -312,6 +312,8 @@ batch_length(sampler::SavedPhaseBuffers) = size(sampler.out_array, 3)
 phase_type(sampler::SavedPhaseBuffers) = eltype(sampler.out_array)
 function prepare_phasebuffers(spec::SavedPhases{T}, plate_size::NTuple{2,Int}, plate_step::Number,
         batch::Int, deviceadapter) where T
+    plate_step ≈ 1 ||
+        @warn "Diameter setting is ignored for `SavedPhases`"
     saved_size = size(spec.dataset)::NTuple{3,Int}
     saved_plate_size = saved_size[1:2]
     all(saved_plate_size .>= plate_size) || throw(ArgumentError(

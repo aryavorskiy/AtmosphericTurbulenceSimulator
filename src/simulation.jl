@@ -60,6 +60,7 @@ the results to an HDF5 file.
 
 # Keyword Arguments
 - `n`: number of phase screens to simulate.
+- `d`: diameter setting for the phase screen generation (in the same units as ``r_0``). Defaults to the maximum of `plate_size`.
 - `batch`: batch size for buffered computations and HDF5 writes (default 128).
 - `file`: output options. Can be a string (filename) or an `HDF5File` object. If set to `nothing`
     (default), no file is written and the phases are returned as an array.
@@ -67,10 +68,10 @@ the results to an HDF5 file.
 - `deviceadapter`: adapter for device-backed arrays (defaults to `Array`). To use GPU arrays,
   pass e.g. `CUDA.CuArray` here (requires CUDA.jl).
 """
-function simulate_phases(atm_spec::AtmosphereSpec, plate_size; n::Int, D=maximum(plate_size),
+function simulate_phases(atm_spec::AtmosphereSpec, plate_size; n::Int, d=maximum(plate_size),
         batch::Int=DEFAULT_BATCH, file=nothing, verbose=true, deviceadapter=Array)
     batch = min(batch, n)
-    phase_buffers = prepare_phasebuffers(atm_spec, plate_size, D / maximum(plate_size), batch, deviceadapter)
+    phase_buffers = prepare_phasebuffers(atm_spec, plate_size, d / maximum(plate_size), batch, deviceadapter)
     simulation_run(file, phase_buffers, nothing, nothing, n; verbose=verbose)
 end
 

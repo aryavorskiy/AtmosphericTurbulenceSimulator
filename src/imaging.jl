@@ -213,7 +213,7 @@ Create an imaging system specification.
 - `photon_count`: `PhotonCount` instance describing the photon budget and background.
 
 # Keyword Arguments
-- `D`: aperture diameter (in the same units as ``r_0``).
+- `d`: aperture diameter (in the same units as ``r_0``).
 - `filter`: `FilterSpec` describing sampled wavelengths and their relative intensities.
   Defaults to a monochromatic filter.
 - `exposure`: a number or an [`Exposure`](@ref) instance describing the exposure time and number of
@@ -225,11 +225,11 @@ Create an imaging system specification.
 """
 function ImagingSpec(aperture::AbstractMatrix{T}, photon_count::PhotonCount;
     filter::FilterSpec=MonoFilterSpec(), nyquist_oversample::Real=1,
-    exposure::Union{Exposure,Number}=0, D=maximum(size(aperture)),
+    exposure::Union{Exposure,Number}=0, d=maximum(size(aperture)),
     img_size::NTuple{2,Int}=round.(Int, size(aperture) .* 2 .* nyquist_oversample)) where T<:Real
     pc = convert(PhotonCount{T}, photon_count)
     ex = exposure isa Number ? Exposure(exposure) : exposure
-    return ImagingSpec(aperture, D, pc, filter, ex, img_size)
+    return ImagingSpec(aperture, d, pc, filter, ex, img_size)
 end
 function ImagingSpec(aperture::AbstractMatrix; nphotons, background=nothing, kw...)
     Base.depwarn("`ImagingSpec(ap; nphotons=..., background=...)` is deprecated and will be \
