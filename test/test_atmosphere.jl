@@ -60,6 +60,7 @@
         atm1 = SingleLayer(Float32, 5, interpolate=2)
         atm2 = SingleLayer(Float32, 5, interpolate_from=(15, 15))
 
+        Random.seed!(123)
         for atm in (atm1, atm2)
             phases = simulate_phases(atm, (64, 64); n=1000, verbose=false)
             @test eltype(phases) == Float32
@@ -67,8 +68,9 @@
             for D in [(3, 2), (3, 15), (5, 5), (5, 20), (16, 2), (16, 16)]
                 diff = @views phases[D[1]+1:end, D[2]+1:end, :] .- phases[1:end-D[1], 1:end-D[2], :]
                 emp_structure = mean(abs2, diff)
-                @test emp_structure ≈ 6.88 * (hypot(D...) / 5)^(5/3) rtol=0.1
+                @test emp_structure ≈ 6.88 * (hypot(D...) / 5)^(5/3) rtol=0.04
             end
         end
+        Random.seed!()
     end
 end
