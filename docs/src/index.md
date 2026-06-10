@@ -39,8 +39,8 @@ images.
 using AtmosphericTurbulenceSimulator, Plots
 
 aperture = CircularAperture((64, 64), 30)
-img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200); filter=FilterSpec(550, bandwidth=40))
-atm = SingleLayer(0.1 / 2 * 64; interpolate=:auto)
+img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2, filter=FilterSpec(550, bandwidth=40))
+atm = SingleLayer(0.1; interpolate=:auto)
 
 result = simulate_images(atm, img_spec; n=8, verbose=false)
 
@@ -65,30 +65,39 @@ D_\phi(r) = \big\langle (\phi(x) - \phi(x+r))^2 \big\rangle
 ```
 
 The Fried parameter ``r_0`` controls turbulence strength. Larger ``r_0`` means weaker phase
-aberrations. In this package, pass ``r_0`` in pixels on the phase-screen grid.
+aberrations. Pass ``r_0`` in the same physical units as the aperture diameter `d` (see below).
+
+The aperture diameter `d` — set via the `d` keyword of [`simulate_phases`](@ref) or
+[`ImagingSpec`](@ref) — defines the physical scale that maps pixels to the ``r_0`` units.
+It defaults to the maximum dimension of the phase-screen grid (i.e. one pixel = one unit), which
+is appropriate when ``r_0`` is already expressed in pixels.
 
 For large grids, [`SingleLayer`](@ref) can use Harding interpolation ([Harding et al. 1999](https://doi.org/10.1364/AO.38.002161)). 
 The phase is sampled on a smaller grid and then upsampled in a way that preserves Kolmogorov statistics. `interpolate=:auto`
 selects a coarse grid size based on the default heuristic.
 
-You can also replay phase screens from a dataset or an array using the [`SavedPhases`](@ref) atmosphere specification.
+You can also replay phase screens from a dataset or an array using the [`SavedPhases`](@ref)
+atmosphere specification. Each atmosphere spec also accepts a `base_wavelength` keyword (in nm,
+default 550 nm) that sets the reference wavelength for broadband simulations.
 
 ## Imaging Model
 
 The parameters of the imaging system are defined by an [`ImagingSpec`](@ref) object, which includes the following fields:
 - The aperture function, which can be a predefined shape like [`CircularAperture`](@ref) or a user-defined array.
+- The aperture diameter `d` (keyword), in the same units as ``r_0``. Defaults to the maximum dimension of the aperture array (one pixel = one unit).
 - The photon budget, defined by a [`PhotonCount`](@ref) object that specifies the total number of photons and background level.
-- The filter specification, defined by a [`FilterSpec`](@ref) that sets the central wavelength and bandwidth for non-monochromatic simulations.
+- The filter specification, defined by a [`FilterSpec`](@ref) that sets the wavelengths and relative intensities for non-monochromatic simulations.
 - The exposure time, which can be used to simulate long exposures by averaging multiple phase screens together. See [`Exposure`](@ref).
 
-The imaging pipeline converts each phase screen into a PSF, applies the selected
-true-sky model, and optionally applies photon shot noise. A non-monochromatic [`FilterSpec`](@ref)
-scales both turbulence strength and diffraction with wavelength, while assuming that the aperture
-itself is achromatic.
+The imaging pipeline converts each phase screen into a PSF, applies the selected true-sky model,
+and optionally applies photon shot noise. A non-monochromatic [`FilterSpec`](@ref) scales both
+turbulence strength and diffraction with wavelength — the wavelength scaling is computed relative
+to the `base_wavelength` of the atmosphere spec (default 550 nm). The aperture itself is assumed
+achromatic.
 
-Long exposures are also supported by averaging multiple phase screens together. To simulate a long exposure, 
-you will need non-zero exposure time and a defined wind velocity in the atmosphere model. See 
-[this example](@ref "Variable exposure times") for details.
+Long exposures are simulated by averaging multiple short-exposure frames with wind-shifted phase
+screens. Wind velocity is interpreted in the same physical units as `d` and ``r_0`` per unit time.
+See [this example](@ref "Variable exposure times") for details.
 
 !!! note
     The sampled-bandpass model is most appropriate for narrow bands where the telescope pupil does
@@ -106,7 +115,7 @@ Julia, or start Julia with the `--threads` flag:
 julia --threads=auto    # use all available cores
 ```
 
-Use [`MultiThreaded`](@ref) for more fine-grained control over the CPU threading behavior, such as 
+Use [`MultiThreaded`](@ref) for more fine-grained control over the CPU threading behavior, such as
 specifying the number of threads or the array type used for computations:
 
 ```julia
@@ -120,6 +129,8 @@ GPU execution is also supported. To use GPU arrays, pass the appropriate device 
 using CUDA
 simulate_images(atm, img_spec; n=100_000, file="simulation.h5", deviceadapter=CuArray)
 ```
+
+Passing an array type directly is equivalent to wrapping it in `MultiThreaded(CuArray)`, which defaults to using the array backend with one CPU thread.
 
 !!! warning
     CUDA.jl is the only GPU backend tested so far. Other Julia GPU array backends may work if

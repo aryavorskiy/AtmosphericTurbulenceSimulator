@@ -46,10 +46,10 @@ specification and a true-sky model:
 ```julia
 # Define circular aperture and imaging parameters
 ap = CircularAperture((64, 64), 25)
-img_spec = ImagingSpec(ap, PhotonCount(1e6, 100))
+img_spec = ImagingSpec(ap, PhotonCount(1e6, 100), d=2)
 
 # Atmosphere specification
-atm = SingleLayer(0.2 / 2 * 64, interpolate=:auto)
+atm = SingleLayer(0.2, interpolate=:auto)
 
 # True sky models:
 # Point source
