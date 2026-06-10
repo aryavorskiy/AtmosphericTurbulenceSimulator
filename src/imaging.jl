@@ -353,7 +353,7 @@ CircularAperture(sz::NTuple{2}, radius=minimum((sz .- 1) .÷ 2); kw...) =
     CircularAperture(Float64, sz, radius; kw...)
 
 function padded_plate_size(atm_spec::AtmosphereSpec, img_spec::ImagingSpec)
-    max_offset = atm_spec.wind_velocity .* img_spec.exposure_spec.exptime
+    max_offset = atm_spec.wind_velocity .* img_spec.exposure_spec.exptime ./ ap_step(img_spec)
     return plate_size(img_spec) .+ ceil.(Int, abs.(max_offset))
 end
 function long_exp_offsets(atm_spec::AtmosphereSpec, img_spec::ImagingSpec)
@@ -361,7 +361,7 @@ function long_exp_offsets(atm_spec::AtmosphereSpec, img_spec::ImagingSpec)
     if n == 1 || iszero(img_spec.exposure_spec.exptime) || all(iszero, atm_spec.wind_velocity)
         offset_list = [atm_spec.wind_velocity .* img_spec.exposure_spec.exptime .* 0]
     else
-        offset_list = [atm_spec.wind_velocity .* (img_spec.exposure_spec.exptime * j / (n - 1)) for j in 0:n-1]
+        offset_list = [atm_spec.wind_velocity .* (img_spec.exposure_spec.exptime * j / (n - 1) / ap_step(img_spec)) for j in 0:n-1]
     end
     if img_spec.exposure_spec.round_offsets
         offset_list = [round.(offset) for offset in offset_list]

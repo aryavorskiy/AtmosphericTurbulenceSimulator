@@ -1,8 +1,9 @@
 using Random
 
 @testset "Imaging" begin
+    # 16 pix aperture, 4 pix r_0, sqrt(2) wind velocity
     ap = CircularAperture((16, 16))
-    atm = SingleLayer(5, wind_velocity=(1, 1))
+    atm = SingleLayer(4, wind_velocity=(1, 1))
     @testset "True sky" begin
         ts1 = PointSource()
         ts2 = DoubleSystem((3, 2), 0.6)
@@ -102,5 +103,22 @@ using Random
 
         @test_throws ArgumentError simulate_images(SavedPhases(res_e.phases; wind_velocity=(2, 2)), img_spec2, n=10)
         @test_throws BoundsError simulate_images(SavedPhases(res_e.phases; wind_velocity=(1, 1)), img_spec2, n=20, batch=7)
+    end
+
+    @testset "Aperture diameter" begin
+        # 4 m aperture, 1 m r_0, 3 sqrt(2)/4 m/s wind velocity, 1 s exposure
+        img_spec1 = ImagingSpec(ap, PhotonCount(Inf), d=4, exposure=1)
+        atm1 = SingleLayer(1, wind_velocity=(0.75, 0.75), interpolate=:auto)
+        Random.seed!(123)
+        res1 = simulate_images(atm1, img_spec1, n=10, verbose=false)
+
+        # 2 m aperture, 0.5 m r_0, sqrt(2)/8 m/s wind velocity, 3 s exposure
+        img_spec2 = ImagingSpec(ap, PhotonCount(Inf), d=2, exposure=3)
+        atm2 = SingleLayer(0.5, wind_velocity=(0.125, 0.125), interpolate=:auto)
+        Random.seed!(123)
+        res2 = simulate_images(atm2, img_spec2, n=10, verbose=false)
+
+        @test res1.phases ≈ res2.phases
+        @test res1.images ≈ res2.images
     end
 end
