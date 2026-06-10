@@ -22,6 +22,10 @@
         @test eltype(C) == Float64
         @test eltype(kolmogorov_covmat(Float32, sz)) == Float32
         @test eltype(kolmogorov_covmat(rand(Float32, sz...))) == Float32
+
+        # Piston removal: for uniform weights the mean of each row should be zero
+        @test all(≈(0; atol=1e-10), sum(C, dims=2))
+        @test all(≈(0; atol=1e-10), sum(C, dims=1))
     end
 
     @testset "Phase screen generation" begin
@@ -37,7 +41,7 @@
 
     @testset "Saved phase screen" begin
         tmpfile = tempname() * ".h5"
-        data = reshape(Float32.(1:6*7*7), 6, 7, 7)
+        data = rand(Float32, 6, 7, 7)
         h5write(tmpfile, "phases", data)
 
         h5open(tmpfile, "r") do fid
@@ -51,6 +55,10 @@
 
             phases2 = simulate_phases(atm, (4, 5); n=3, verbose=false)
             @test phases2[:, :, 1:3] == data[1:4, 1:5, 1:3]
+
+            atm2 = SavedPhases(fid["phases"]; base_wavelength=500.0)
+            @test atm2.base_wavelength == 500.0
+            @test_warn "ignored for `SavedPhases`" simulate_phases(atm2, (6, 7); n=1, d=5, verbose=false)
         end
         rm(tmpfile, force=true)
     end

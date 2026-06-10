@@ -1,4 +1,4 @@
-import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
+import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers, isfinite_photons
 
 @testset "Constructors" begin
     @testset "SingleLayer" begin
@@ -41,6 +41,19 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
         filter = FilterSpec(500; bandwidth=100, npts=5)
         @test filter.wavelengths == range(450, 550, length=5)
         @test filter.intensities == ones(5)
+
+        # Non-flat intensities (tcenter ≠ tedge)
+        filter_shaped = FilterSpec(550.0; bandwidth=100.0, tcenter=1.0, tedge=0.5, npts=7)
+        @test filter_shaped.intensities[4] ≈ 1.0          # center
+        @test filter_shaped.intensities[1] ≈ 0.5          # edges
+        @test filter_shaped.intensities[end] ≈ 0.5
+
+        # Direct vector constructor
+        wl = [480.0, 550.0, 620.0]
+        intens = [0.8, 1.0, 0.8]
+        filter_vec = FilterSpec(wl, intens)
+        @test filter_vec.wavelengths == wl
+        @test filter_vec.intensities == intens
     end
 
     @testset "CircularAperture" begin
@@ -78,6 +91,63 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers
         @test img_spec_filter.photon_count.background == 10
 
         @test_throws ArgumentError ImagingSpec(ap, PhotonCount(1e6))
+    end
+
+    @testset "PhotonCount" begin
+        pc_inf = PhotonCount(Inf)
+        @test !isfinite_photons(pc_inf)
+        @test pc_inf.background == 0.0
+
+        pc = PhotonCount(1e6, 100.0)
+        @test isfinite_photons(pc)
+        @test convert(PhotonCount{Float32}, pc).nphotons ≈ Float32(1e6)
+
+        # Finite nphotons without background must throw
+        @test_throws ArgumentError PhotonCount(1e6)
+    end
+
+    @testset "Exposure" begin
+        ex = Exposure(2.0, 5)
+        @test ex.exptime == 2.0
+        @test ex.nsteps == 5
+        @test ex.round_offsets == false
+
+        ex_round = Exposure(2.0, 5; round_offsets=true)
+        @test ex_round.round_offsets == true
+
+        # nsteps forced to 1 when exptime is zero
+        ex_zero = Exposure(0.0, 10)
+        @test ex_zero.nsteps == 1
+
+        # Warning for nsteps=1 with non-zero exptime
+        @test_warn "Ignoring non-zero exposure time" Exposure(1.0, 1)
+    end
+
+    @testset "CircularAperture" begin
+        ap_f32 = CircularAperture(Float32, (16, 16), 7)
+        @test eltype(ap_f32) == Float32
+        @test all(0f0 .<= ap_f32 .<= 1f0)
+
+        # aa_dist=2: transition band has intermediate values
+        ap_aa = CircularAperture((32, 32), 14; aa_dist=2)
+        @test any(x -> 0.0 < x < 1.0, ap_aa)
+    end
+
+    @testset "MultiThreaded constructors" begin
+        mt1 = MultiThreaded(2)
+        @test mt1.nworkers == 2
+        @test mt1.adapter === identity
+
+        mt2 = MultiThreaded(Array, 3)
+        @test mt2.adapter === Val(Array)
+        @test mt2.nworkers == 3
+
+        mt_default = MultiThreaded()
+        @test mt_default.nworkers == Threads.nthreads()
+
+        mt_arr = MultiThreaded(Array)
+        @test mt_arr.adapter === Val(Array)
+        @test mt_arr.nworkers == 1
     end
 
     @testset "TrueSky models" begin
