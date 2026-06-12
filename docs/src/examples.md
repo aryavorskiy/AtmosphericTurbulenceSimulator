@@ -19,24 +19,43 @@ units, so that ``r_0`` and `d` share a common physical scale. For a 2 m telescop
 using AtmosphericTurbulenceSimulator
 
 atm = SingleLayer(0.2; interpolate=:auto)   # r0 = 0.2 m
+phases = simulate_phases(atm, (64, 64); n=512, d=2, verbose=false)  # d = 2 m aperture
 nothing # hide
 ```
 
-Generate phase screens by passing the atmosphere model, desired plate size, and aperture diameter
-to [`simulate_phases`](@ref):
+A useful sanity check is the phase **structure function**
+``D(r) = \langle |\phi(\mathbf{x} + \mathbf{r}) - \phi(\mathbf{x})|^2 \rangle``, which for Kolmogorov
+turbulence follows ``D(r) = 6.88\,(r / r_0)^{5/3}``. We estimate it empirically by averaging the
+squared phase difference over all positions and frames for a range of pixel separations along one
+axis, then compare against the theoretical law:
 
 ```@example phase_generation
-using Plots
+using Plots, Statistics
+r0_px = 0.2 / (2 / 64)                       # r0 in pixels
+seps = 1:20                                  # pixel separations to probe
+emp = @views [mean(abs2, phases[s+1:end, :, :] .- phases[1:end-s, :, :]) for s in seps]
+theory = 6.88 .* (seps ./ r0_px) .^ (5 / 3)
 
-phases = simulate_phases(atm, (64, 64); n=1, d=2, verbose=false)  # d = 2 m aperture
-heatmap(
+p1 = heatmap(
     phases[:, :, 1],
     colorbar=true,
     colormap=:viridis,
     aspect_ratio=:equal,
-    title="Turbulent Phase Screen",
-    size=(500, 450),
+    title="Example Phase Screen",
 )
+p2 = plot(
+    seps, emp;
+    seriestype=:scatter,
+    label="empirical",
+    xlabel="separation r (pixels)",
+    ylabel="D(r)",
+    xscale=:log10,
+    yscale=:log10,
+    title="Structure Function",
+    legend=:topleft,
+)
+plot!(p2, seps, theory; label=raw"$6.88\,(r/r_0)^{5/3}$", lw=2)
+plot(p1, p2, layout=(1, 2), size=(900, 450))
 ```
 
 To write phase screens to HDF5, pass a file name or [`HDF5File`](@ref):
@@ -45,94 +64,58 @@ To write phase screens to HDF5, pass a file name or [`HDF5File`](@ref):
 simulate_phases(atm, (64, 64); n=3000, file="phases.h5")
 ```
 
-## Point-Source Imaging
+## True-Sky Models
 
-An imaging simulation needs an aperture, photon budget, atmosphere, and true-sky model.
+An imaging simulation needs an aperture, photon budget, atmosphere, and true-sky model. The package
+ships three true-sky models:
 
-```@example point_source_imaging
+- A **point source** — the default when no sky is passed to [`simulate_images`](@ref). The result is
+  the atmospheric PSF itself.
+- [`DoubleSystem`](@ref) — a primary plus a secondary source. The relative position is given in image
+  pixels and the intensity is relative to the primary.
+- [`TrueSkyImage`](@ref) — an arbitrary extended brightness distribution. The input image must match
+  the final imaging grid size, not the aperture size.
+
+```@example true_sky
 using AtmosphericTurbulenceSimulator
+using Plots, Statistics
 
 aperture = CircularAperture((64, 64), 30)
-img_spec = ImagingSpec(
-    aperture,
-    PhotonCount(1e7, 200);
-    d=2,
-    filter=FilterSpec(550, bandwidth=40),
-)
+img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2, filter=FilterSpec(550, bandwidth=40))
 atm = SingleLayer(0.2; interpolate=:auto)
+
+point_imgs = simulate_images(atm, img_spec; n=128, savephases=false, verbose=false).images
+
+double_sky = DoubleSystem((35, 15), 0.3)
+double_imgs = simulate_images(double_sky, atm, img_spec; n=128, savephases=false, verbose=false).images
+
+sky_img = zeros(Float32, 128, 128)   # matches the 128×128 imaging grid
+sky_img[65, 65] = 1
+sky_img[50, 83] = 0.30
+sky_img[78, 42] = 0.42
+sky_img[91, 88] = 0.18
+extended_sky = TrueSkyImage(sky_img)
+extended_imgs = simulate_images(extended_sky, atm, img_spec; n=128, savephases=false, verbose=false).images
 nothing # hide
 ```
 
-Run the simulation in memory by leaving `file=nothing`, which is the default:
+The figure below shows a single frame (top row) and the average over all frames (bottom row) for
+each true-sky model. The point source recovers the long-exposure PSF, while the extended sources are
+each convolved with that same PSF:
 
-```@example point_source_imaging
-using Plots, Statistics
-
-result = simulate_images(atm, img_spec; n=128, savephases=false, verbose=false)
-images = result.images
-
-p1 = heatmap(images[:, :, 1], title="Single Frame", cmap=:jet, aspect_ratio=:equal)
-p2 = heatmap(
-    mean(images, dims=3)[:, :, 1],
-    title="Average",
-    cmap=:jet,
-    aspect_ratio=:equal,
-)
-plot(p1, p2, layout=(1, 2), size=(900, 450))
-```
-
-## Binary Systems
-
-Use [`DoubleSystem`](@ref) to model a primary source plus a secondary source. The relative position
-is specified in image pixels, and the intensity is relative to the primary.
-
-```@example binary_imaging
-using AtmosphericTurbulenceSimulator
-using Plots, Statistics
-
-aperture = CircularAperture((64, 64), 30)
-img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2)
-atm = SingleLayer(0.2; interpolate=:auto)
-sky = DoubleSystem((35, 15), 0.3)
-
-images = simulate_images(sky, atm, img_spec; n=128, savephases=false, verbose=false).images
-p1 = heatmap(images[:, :, 1], title="Single Frame", cmap=:jet, aspect_ratio=:equal)
-p2 = heatmap(
-    mean(images, dims=3)[:, :, 1], 
-    title="Average", 
-    cmap=:jet, 
-    aspect_ratio=:equal
-)
-plot(p1, p2, layout=(1, 2), size=(900, 450))
-```
-
-## Extended True-Sky Images
-
-Use [`TrueSkyImage`](@ref) for arbitrary extended brightness distributions. The input image must
-match the final imaging grid size, not the aperture size.
-
-```@example extended_imaging
-using AtmosphericTurbulenceSimulator
-using Plots, Statistics
-
-aperture = CircularAperture((64, 64), 30)
-img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200); d=4, img_size=(128, 128))
-atm = SingleLayer(0.2; interpolate=:auto)
-
-true_sky = zeros(Float32, 128, 128)
-true_sky[65, 65] = 1
-true_sky[50, 83] = 0.18
-true_sky[78, 42] = 0.42
-true_sky[91, 88] = 0.08
-
-sky = TrueSkyImage(true_sky)
-images = simulate_images(sky, atm, img_spec; n=128, savephases=false, verbose=false).images
-
+```@example true_sky
 hmap_kws = (; colormap=:jet, aspect_ratio=:equal, cbar=false)
-p1 = heatmap(true_sky; title="True Sky", hmap_kws...)
-p2 = heatmap(images[:, :, 1]; title="Single Frame", hmap_kws...)
-p3 = heatmap(mean(images, dims=3)[:, :, 1]; title="Average", hmap_kws...)
-plot(p1, p2, p3, layout=(1, 3), size=(1200, 450))
+img_average(imgs) = dropdims(mean(imgs, dims=3), dims=3)
+
+plot(
+    heatmap(point_imgs[:, :, 1]; title="Point — single", hmap_kws...),
+    heatmap(double_imgs[:, :, 1]; title="Binary — single", hmap_kws...),
+    heatmap(extended_imgs[:, :, 1]; title="Extended — single", hmap_kws...),
+    heatmap(img_average(point_imgs); title="Point — average", hmap_kws...),
+    heatmap(img_average(double_imgs); title="Binary — average", hmap_kws...),
+    heatmap(img_average(extended_imgs); title="Extended — average", hmap_kws...),
+    layout=(2, 3), size=(1200, 800)
+)
 ```
 
 ## Variable exposure times
@@ -158,13 +141,13 @@ The screen is automatically cropped to the 64-pixel aperture grid and shifted by
 ``v \times t_\text{exp}`` in physical units, converted to pixels via `d`:
 
 ```@example variable_exposure
-atm_saved = SavedPhases(phases; wind_velocity=(0.5, 0.5))   # 0.7 m/s on a 64-px/2-m grid
+atm_saved = SavedPhases(phases; wind_velocity=(0.4, 0.4))   # 0.55 m/s on a 64-px/2-m grid
 ap = CircularAperture((64, 64), 31)
 img_spec_base = ImagingSpec(ap, PhotonCount(Inf); d=2)
 img_shrt  = simulate_images(atm_saved, img_spec_base; n=1).images[:, :, 1]
-img_medi = simulate_images(atm_saved,                     # vt = 0.7 m/s × 0.5 s = 0.35 m shift
+img_medi = simulate_images(atm_saved,                     # vt = 0.55 m/s × 0.5 s = 0.275 m shift
     ImagingSpec(ap, PhotonCount(Inf); d=2, exposure=Exposure(0.5, 10)); n=1).images[:, :, 1]
-img_long   = simulate_images(atm_saved,                 # vt = 0.7 m/s × 5 s = 3.5 m shift
+img_long   = simulate_images(atm_saved,                 # vt = 0.55 m/s × 5 s = 2.75 m shift
     ImagingSpec(ap, PhotonCount(Inf); d=2, exposure=Exposure(5, 10)); n=1).images[:, :, 1]
 
 hmap_kws = (; colormap=:jet, aspect_ratio=:equal, cbar=false, clims=(0, maximum(img_shrt)))
