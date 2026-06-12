@@ -28,10 +28,11 @@ using AtmosphericTurbulenceSimulator
 
 # With Harding interpolation: samples at low resolution, then upsamples
 # Using :auto to determine optimal number of interpolation passes
-atm = SingleLayer(0.2 / 2 * 64; interpolate=:auto)
+# Fried parameter r0 = 0.2 m
+atm = SingleLayer(0.2; interpolate=:auto)
 
-# Generate phase screens and save to HDF5
-simulate_phases(atm, (64, 64); n=3000, file="phases.h5")
+# Generate phase screens and save to HDF5 (64-pixel grid with 2 m size)
+simulate_phases(atm, (64, 64); n=3000, d=2, file="phases.h5")
 ```
 
 The Harding interpolation (from [Harding et al. 1999](https://doi.org/10.1364/AO.38.002161))
