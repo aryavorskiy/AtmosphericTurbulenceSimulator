@@ -110,5 +110,5 @@ Please note that this package is in early development. There are multiple featur
     - [x] Phase loader
     - [ ] PSF loader for true-sky application
 - [x] Long exposures
-- [ ] Multi-wavelength imaging
+- [x] Multi-wavelength imaging
 - [ ] Wavefront sensor simulation

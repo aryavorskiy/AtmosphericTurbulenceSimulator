@@ -23,7 +23,7 @@ using Random
             phases = res.phases
 
             @test size(images) == (32, 32, 16)
-            @test size(phases) == (iszero(is.exposure_spec.exptime) ? (16, 16, 16) : (19, 19, 16))
+            @test size(phases) == (iszero(is.exposure.exptime) ? (16, 16, 16) : (19, 19, 16))
 
             # Total photon count should be approximately correct
             # (within reasonable variance due to Poisson noise)

@@ -89,7 +89,7 @@ function HardingSpec(final_size::NTuple{2,Int}; interpolate=0, interpolate_from=
 end
 
 """
-    SingleLayer([T, ]size, r0[; interpolate, interpolate_from, size_heuristics=1024])
+    SingleLayer([T, ]size, r0[; base_wavelength, wind_velocity, interpolate, interpolate_from, size_heuristics=1024])
 
 An `AtmosphereSpec` that produces independent (uncorrelated) phase frames for each timestep.
 
@@ -99,6 +99,10 @@ An `AtmosphereSpec` that produces independent (uncorrelated) phase frames for ea
 - `r0`: Fried parameter (r₀) in pixels.
 
 # Keyword Arguments
+- `base_wavelength`: reference wavelength in nm used to scale phase screens when a multi-wavelength
+  `FilterSpec` is used (default 550 nm).
+- `wind_velocity`: two-component `(vx, vy)` wind velocity used for long-exposure offsets in
+  imaging simulations (default `(0, 0)`).
 - `interpolate`: when specified, the phase screen is sampled at a lower resolution and
     then upsampled using specified number of Harding interpolation passes. If set to `:auto`,
     the number of passes is chosen such that the low-res grid has at most `size_heuristics` total pixels.
@@ -275,7 +279,7 @@ function samplephases!(harding::HardingInterpolator)
 end
 
 """
-    SavedPhases(dataset[; wind_velocity=(0, 0)])
+    SavedPhases(dataset[; wind_velocity, base_wavelength])
 
 An `AtmosphereSpec` that reuses phase screens saved in a dataset.
 
@@ -288,7 +292,10 @@ available, an error is thrown, there is no guarantee what is in the tail of the 
   This can be an in-memory array or an HDF5 dataset (e.g. `HDF5.Dataset`).
 
 # Keyword Arguments
-- `wind_velocity`: two-component velocity used for long-exposure offsets in imaging simulations.
+- `base_wavelength`: reference wavelength in nm used to scale phase screens when a multi-wavelength
+  `FilterSpec` is used (default 550 nm).
+- `wind_velocity`: two-component `(vx, vy)` wind velocity used for long-exposure offsets in
+  imaging simulations (default `(0, 0)`).
 """
 struct SavedPhases{T<:Real,D,WT,WL} <: AtmosphereSpec{T}
     dataset::D

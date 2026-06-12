@@ -32,6 +32,7 @@ nwavel(fs::FilterSpec) = length(fs.wavelengths)
 - `bandwidth`: total width of the filter bandpass in wavelength units.
 - `tcenter`: relative intensity at the center wavelength (default 1).
 - `tedge`: relative intensity at the edges of the bandpass (default 1).
+- `npts`: number of sample points across the bandpass (default 7).
 """
 function FilterSpec(base_wavelength::Real=DEFAULT_WAVELEN; bandwidth, tcenter=1, tedge=1, npts=7)
     wavelengths = range(base_wavelength - bandwidth / 2, base_wavelength + bandwidth / 2, length=npts)
@@ -179,7 +180,8 @@ Adapt.adapt_structure(to, ts::TrueSkyImage) =
     ImagingSpec
 
 Container for the imaging system configuration. It is defined by the telescope `aperture`, the
-source brightness via `photon_count`, an optional spectral `filter_spec`, and the output `img_size`.
+source brightness via `photon_count`, an optional spectral `filter_spec`, the `exposure`,
+and the output `img_size`.
 If `img_size` does not match the aperture’s Nyquist grid, the aperture is zero-padded accordingly.
 """
 struct ImagingSpec{T, T2, AT<:AbstractMatrix{T}, FST<:FilterSpec}
@@ -187,17 +189,17 @@ struct ImagingSpec{T, T2, AT<:AbstractMatrix{T}, FST<:FilterSpec}
     aperture_diameter::T2
     photon_count::PhotonCount{T}
     filter_spec::FST
-    exposure_spec::Exposure
+    exposure::Exposure
     img_size::NTuple{2,Int}
     function ImagingSpec(
         aperture::AbstractMatrix{T},
         aperture_diameter::Number,
         photon_count::PhotonCount{T},
         filter_spec::FilterSpec,
-        exposure_spec::Exposure,
+        exposure::Exposure,
         img_size::NTuple{2,Int}) where T<:Real
         new{T, typeof(aperture_diameter), typeof(aperture), typeof(filter_spec)}(
-            aperture, aperture_diameter, photon_count, filter_spec, exposure_spec, img_size)
+            aperture, aperture_diameter, photon_count, filter_spec, exposure, img_size)
     end
 end
 
@@ -246,7 +248,7 @@ ImagingSpec(::Type{T}, aperture::AbstractMatrix, args...; kw...) where T<:Real =
 
 Adapt.adapt_structure(to, img_spec::ImagingSpec) =
     ImagingSpec(Adapt.adapt_storage(to, img_spec.aperture), img_spec.aperture_diameter,
-    img_spec.photon_count, img_spec.filter_spec, img_spec.exposure_spec, img_spec.img_size)
+    img_spec.photon_count, img_spec.filter_spec, img_spec.exposure, img_spec.img_size)
 plate_size(img_spec::ImagingSpec) = size(img_spec.aperture)
 image_size(img_spec::ImagingSpec) = img_spec.img_size
 ap_step(img_spec::ImagingSpec) = img_spec.aperture_diameter / maximum(plate_size(img_spec))
@@ -293,15 +295,6 @@ function phases_to_psf!(bufs::OpticalBuffers, interpolator::BilinearInterpolator
     interpolate_mapmuladd!(bufs.psf_buffer, bufs.focal_buffer, interpolator, psf_factor, identity, abs2)
 end
 
-function readout!(dst::AbstractArray, img::AbstractArray, pc::PhotonCount, psf_norm)
-    if isfinite_photons(pc)
-        @. dst = rand(Poisson(real(img) / psf_norm * pc.nphotons + pc.background))
-    else
-        @. dst = img / psf_norm
-    end
-end
-readout!(opt_buffer::OpticalBuffers, pc::PhotonCount, psf_norm) =
-    readout!(opt_buffer.read_buffer, opt_buffer.psf_buffer, pc, psf_norm)
 function apply_truesky!(opt_buffer::OpticalBuffers, ts::TrueSkyImage)
     copyto!(opt_buffer.focal_buffer, opt_buffer.psf_buffer)
     mul!(opt_buffer.aperture_buffer, opt_buffer.fftplan, opt_buffer.focal_buffer)
@@ -320,6 +313,26 @@ function apply_truesky!(opt_buffer::OpticalBuffers, ds::DoubleSystem)
 end
 apply_truesky!(::OpticalBuffers, ::PointSource) = nothing
 
+function readout!(dst::AbstractArray, img::AbstractArray, pc::PhotonCount, psf_norm)
+    if isfinite_photons(pc)
+        @. dst = rand(Poisson(real(img) / psf_norm * pc.nphotons + pc.background))
+    else
+        @. dst = img / psf_norm
+    end
+end
+readout!(opt_buffer::OpticalBuffers, pc::PhotonCount, psf_norm) =
+    readout!(opt_buffer.read_buffer, opt_buffer.psf_buffer, pc, psf_norm)
+
+function compute_images!(readout_to, opt_buffer::OpticalBuffers, spec::ImagingSpec, phs_factors, phases, true_sky, offsets, psf_norm)
+    fill!(opt_buffer.psf_buffer, 0)
+    filter = spec.filter_spec
+    for offset in offsets, w in 1:nwavel(filter)
+        write_phases!(opt_buffer, phases, spec, offset, phs_factors[w])
+        phases_to_psf!(opt_buffer, opt_buffer.interpolators[w], filter.intensities[w] / phs_factors[w]^2)
+    end
+    apply_truesky!(opt_buffer, true_sky)
+    readout!(readout_to, opt_buffer.psf_buffer, spec.photon_count, psf_norm * length(offsets))
+end
 
 """
     CircularAperture([T, ]sz, radius[; aa_dist=1])
@@ -353,31 +366,21 @@ CircularAperture(sz::NTuple{2}, radius=minimum((sz .- 1) .÷ 2); kw...) =
     CircularAperture(Float64, sz, radius; kw...)
 
 function padded_plate_size(atm_spec::AtmosphereSpec, img_spec::ImagingSpec)
-    max_offset = atm_spec.wind_velocity .* img_spec.exposure_spec.exptime ./ ap_step(img_spec)
+    max_offset = atm_spec.wind_velocity .* img_spec.exposure.exptime ./ ap_step(img_spec)
     return plate_size(img_spec) .+ ceil.(Int, abs.(max_offset))
 end
 function long_exp_offsets(atm_spec::AtmosphereSpec, img_spec::ImagingSpec)
-    n = img_spec.exposure_spec.nsteps
-    if n == 1 || iszero(img_spec.exposure_spec.exptime) || all(iszero, atm_spec.wind_velocity)
-        offset_list = [atm_spec.wind_velocity .* img_spec.exposure_spec.exptime .* 0]
+    n = img_spec.exposure.nsteps
+    if n == 1 || iszero(img_spec.exposure.exptime) || all(iszero, atm_spec.wind_velocity)
+        offset_list = [atm_spec.wind_velocity .* img_spec.exposure.exptime .* 0]
     else
-        offset_list = [atm_spec.wind_velocity .* (img_spec.exposure_spec.exptime * j / (n - 1) / ap_step(img_spec)) for j in 0:n-1]
+        offset_list = [atm_spec.wind_velocity .* (img_spec.exposure.exptime * j / (n - 1) / ap_step(img_spec)) for j in 0:n-1]
     end
-    if img_spec.exposure_spec.round_offsets
+    if img_spec.exposure.round_offsets
         offset_list = [round.(offset) for offset in offset_list]
     end
     mins = minimum(first, offset_list), minimum(last, offset_list)
     return [BilinearShift(img_spec.aperture, offset .- mins) for offset in offset_list]
-end
-function compute_images!(readout_to, opt_buffer::OpticalBuffers, spec::ImagingSpec, phs_factors, phases, true_sky, offsets, psf_norm)
-    fill!(opt_buffer.psf_buffer, 0)
-    filter = spec.filter_spec
-    for offset in offsets, w in 1:nwavel(filter)
-        write_phases!(opt_buffer, phases, spec, offset, phs_factors[w])
-        phases_to_psf!(opt_buffer, opt_buffer.interpolators[w], filter.intensities[w] / phs_factors[w]^2)
-    end
-    apply_truesky!(opt_buffer, true_sky)
-    readout!(readout_to, opt_buffer.psf_buffer, spec.photon_count, psf_norm * length(offsets))
 end
 
 struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT,CT,VT}
