@@ -282,7 +282,7 @@ function write_phases!(aperture_buffer, phases, aperture, offset, phs_factor)
     Cx, Cy = size(aperture_buffer) .÷ 2
     fill!(aperture_buffer, 0)
     ap_slice = @view aperture_buffer[Cx - M ÷ 2 + 1:Cx - M ÷ 2 + M, Cy - N ÷ 2 + 1:Cy - N ÷ 2 + N, :]
-    interpolate_mapmuladd!(ap_slice, phases, offset, aperture, cis, Base.Fix2(*, phs_factor))
+    interpolate_mapmuladd!(ap_slice, phases, offset, aperture, cis, Base.Fix2(/, phs_factor))
 end
 write_phases!(bufs::OpticalBuffers, phases, img_spec::ImagingSpec, offset, phs_factor) =
     write_phases!(bufs.focal_buffer, phases, img_spec.aperture, offset, phs_factor)
@@ -395,7 +395,7 @@ function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int,
     nbufs = min(adapter.nworkers, batch)
     chunk_ranges = collect(chunks(1:batch; n=nbufs))
     img_spec_adapt = adapt(adapter, img_spec)
-    phs_factors = atm_spec.base_wavelength ./ img_spec.filter_spec.wavelengths
+    phs_factors = img_spec.filter_spec.wavelengths ./ atm_spec.base_wavelength
     opt_buffer1 = OpticalBuffers(T, img_spec_adapt, phs_factors, length(chunk_ranges[1]))
     img_array = similar(opt_buffer1.read_buffer, image_size(img_spec)..., batch)
     opt_bufs = Array{typeof(opt_buffer1)}(undef, nbufs)

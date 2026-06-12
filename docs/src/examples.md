@@ -143,17 +143,15 @@ atm = SingleLayer(0.2; interpolate=:auto)
 filter_vis = FilterSpec(550; bandwidth=40)
 filter_nir = FilterSpec(820; bandwidth=40)
 
-img_spec_vis = ImagingSpec(aperture, PhotonCount(1e7, 200); filter=filter_vis)
-img_spec_nir = ImagingSpec(aperture, PhotonCount(1e7, 200); filter=filter_nir)
+img_spec_vis = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2, filter=filter_vis)
+img_spec_nir = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2, filter=filter_nir)
 
 phases, imgs_vis = simulate_images(atm, img_spec_vis; n=128)
 imgs_nir = simulate_images(SavedPhases(phases), img_spec_nir; n=128).images
 nothing # hide
 ```
 
-The NIR PSF is broader (diffraction scales as ``\lambda/D``) but less aberrated (turbulence in
-radians scales as ``1/\lambda``). The long-exposure average makes the wavelength difference
-especially clear:
+The NIR PSF is slightly narrower (the seeing scales as ``\lambda / r_0 \propto \lambda^{-1/5}``), but the speckles themselves are much bigger, because their size scales as ``\lambda / D``. The simulation handles the wavelength scaling automatically.
 
 ```@example multiband
 img_avg(imgs) = dropdims(mean(imgs, dims=3), dims=3)
@@ -168,6 +166,9 @@ heatmap(fig[2, 1], img_avg(imgs_vis); heatmap_kws("550 nm — average")...)
 heatmap(fig[2, 2], img_avg(imgs_nir); heatmap_kws("820 nm — average")...)
 fig
 ```
+
+!!! note
+    The angular resolution of the final images is determined by ``\delta \theta = \cdot \frac{\lambda_{base}}{2\alpha D}``, where ``\alpha`` is the Nyquist oversampling factor (default 1, see [`ImagingSpec`](@ref) manual for details).
 
 ## Variable exposure times
 
