@@ -37,7 +37,7 @@ seps = 1:20                                  # pixel separations to probe
 emp = @views [mean(abs2, phases[s+1:end, :, :] .- phases[1:end-s, :, :]) for s in seps]
 theory = 6.88 .* (seps ./ r0_px) .^ (5 / 3)
 
-fig = Figure(size=(900, 450))
+fig = Figure(size=(800, 400))
 
 ax1 = Axis(fig[1, 1]; aspect=1, title="Example Phase Screen")
 heatmap!(ax1, phases[:, :, 1]; colormap=:viridis)
@@ -121,6 +121,54 @@ end
 fig
 ```
 
+## Multi-wavelength Imaging
+
+Atmospheric phase screens are wavelength-dependent: the same wavefront distortion produces a phase
+shift ``\phi \propto 1/\lambda``, so turbulence is stronger (in radians) at shorter wavelengths. In the same way, ``r_0`` is wavelength-dependent, scaling as ``r_0 \propto \lambda^{6/5}``.
+The simulation accounts for this automatically by fixing the `base_wavelength` for ``r_0`` in the atmosphere spec and then scaling the turbulence strength according to the wavelengths in [`FilterSpec`](@ref).
+
+To image the **same physical wavefront** in two bands you must use [`SavedPhases`](@ref) — the
+phases are generated once at the reference wavelength and then replayed with a different filter.
+Running two independent [`SingleLayer`](@ref) simulations would draw uncorrelated phase screens and
+lose the physical relationship between the bands.
+
+```@example multiband
+using AtmosphericTurbulenceSimulator
+using CairoMakie, Statistics
+
+aperture = CircularAperture((64, 64), 30)
+atm = SingleLayer(0.2; interpolate=:auto)
+
+# Two narrow-band filters centred at 550 nm and 820 nm
+filter_vis = FilterSpec(550; bandwidth=40)
+filter_nir = FilterSpec(820; bandwidth=40)
+
+img_spec_vis = ImagingSpec(aperture, PhotonCount(1e7, 200); filter=filter_vis)
+img_spec_nir = ImagingSpec(aperture, PhotonCount(1e7, 200); filter=filter_nir)
+
+phases, imgs_vis = simulate_images(atm, img_spec_vis; n=128)
+imgs_nir = simulate_images(SavedPhases(phases), img_spec_nir; n=128).images
+nothing # hide
+```
+
+The NIR PSF is broader (diffraction scales as ``\lambda/D``) but less aberrated (turbulence in
+radians scales as ``1/\lambda``). The long-exposure average makes the wavelength difference
+especially clear:
+
+```@example multiband
+img_avg(imgs) = dropdims(mean(imgs, dims=3), dims=3)
+
+heatmap_kws(title) = (; colormap=:jet,
+    axis=(; aspect=DataAspect(), title=title, xticks=Int[], yticks=Int[]))
+
+fig = Figure(size=(800, 800))
+heatmap(fig[1, 1], imgs_vis[:, :, 1]; heatmap_kws("550 nm — single")...)
+heatmap(fig[1, 2], imgs_nir[:, :, 1]; heatmap_kws("820 nm — single")...)
+heatmap(fig[2, 1], img_avg(imgs_vis); heatmap_kws("550 nm — average")...)
+heatmap(fig[2, 2], img_avg(imgs_nir); heatmap_kws("820 nm — average")...)
+fig
+```
+
 ## Variable exposure times
 
 To simulate long exposures you need non-zero wind velocity on the atmosphere spec and non-zero
@@ -155,7 +203,7 @@ img_long = simulate_images(atm_saved,                      # vt = 5.5 m/s × 0.5
 
 heatmap_kws(title) = (;colormap=:jet, colorrange=(0, maximum(img_shrt)), 
     axis=(;aspect=DataAspect(), title=title, xticks=Int[], yticks=Int[]))
-fig = Figure(size=(900, 900))
+fig = Figure(size=(800, 800))
 heatmap(fig[1, 1], phases[:, :, 1]; heatmap_kws("Phase screen")..., 
     colormap=:viridis, colorrange=Makie.automatic)
 heatmap(fig[2, 1], img_shrt; heatmap_kws("Instant")...)
