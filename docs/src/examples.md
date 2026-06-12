@@ -19,7 +19,7 @@ units, so that ``r_0`` and `d` share a common physical scale. For a 2 m telescop
 using AtmosphericTurbulenceSimulator
 
 atm = SingleLayer(0.2; interpolate=:auto)   # r0 = 0.2 m
-phases = simulate_phases(atm, (64, 64); n=512, d=2, verbose=false)  # d = 2 m aperture
+phases = simulate_phases(atm, (64, 64); n=512, d=2)  # d = 2 m aperture
 nothing # hide
 ```
 
@@ -30,32 +30,34 @@ squared phase difference over all positions and frames for a range of pixel sepa
 axis, then compare against the theoretical law:
 
 ```@example phase_generation
-using Plots, Statistics
+using CairoMakie, Statistics
+
 r0_px = 0.2 / (2 / 64)                       # r0 in pixels
 seps = 1:20                                  # pixel separations to probe
 emp = @views [mean(abs2, phases[s+1:end, :, :] .- phases[1:end-s, :, :]) for s in seps]
 theory = 6.88 .* (seps ./ r0_px) .^ (5 / 3)
 
-p1 = heatmap(
-    phases[:, :, 1],
-    colorbar=true,
-    colormap=:viridis,
-    aspect_ratio=:equal,
-    title="Example Phase Screen",
-)
-p2 = plot(
-    seps, emp;
-    seriestype=:scatter,
-    label="empirical",
+fig = Figure(size=(900, 450))
+
+ax1 = Axis(fig[1, 1]; aspect=1, title="Example Phase Screen")
+heatmap!(ax1, phases[:, :, 1]; colormap=:viridis)
+hidedecorations!(ax1)
+
+ax2 = Axis(fig[1, 2];
+    title="Structure Function",
     xlabel="separation r (pixels)",
     ylabel="D(r)",
-    xscale=:log10,
-    yscale=:log10,
-    title="Structure Function",
-    legend=:topleft,
+    xscale=log10,
+    yscale=log10,
+    xticks=[1, 2, 5, 10, 20],
+    xminorticks=1:20,
+    xminorticksvisible=true,
 )
-plot!(p2, seps, theory; label=raw"$6.88\,(r/r_0)^{5/3}$", lw=2)
-plot(p1, p2, layout=(1, 2), size=(900, 450))
+scatter!(ax2, collect(seps), emp; label="empirical")
+lines!(ax2, collect(seps), theory; label=L"6.88\,(r/r_0)^{5/3}", linewidth=2, color=Cycled(2))
+axislegend(ax2; position=:lt)
+
+fig
 ```
 
 To write phase screens to HDF5, pass a file name or [`HDF5File`](@ref):
@@ -78,16 +80,16 @@ ships three true-sky models:
 
 ```@example true_sky
 using AtmosphericTurbulenceSimulator
-using Plots, Statistics
+using CairoMakie, Statistics
 
 aperture = CircularAperture((64, 64), 30)
 img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2, filter=FilterSpec(550, bandwidth=40))
 atm = SingleLayer(0.2; interpolate=:auto)
 
-point_imgs = simulate_images(atm, img_spec; n=128, savephases=false, verbose=false).images
+point_imgs = simulate_images(atm, img_spec; n=128).images
 
 double_sky = DoubleSystem((35, 15), 0.3)
-double_imgs = simulate_images(double_sky, atm, img_spec; n=128, savephases=false, verbose=false).images
+double_imgs = simulate_images(double_sky, atm, img_spec; n=128).images
 
 sky_img = zeros(Float32, 128, 128)   # matches the 128×128 imaging grid
 sky_img[65, 65] = 1
@@ -95,7 +97,7 @@ sky_img[50, 83] = 0.30
 sky_img[78, 42] = 0.42
 sky_img[91, 88] = 0.18
 extended_sky = TrueSkyImage(sky_img)
-extended_imgs = simulate_images(extended_sky, atm, img_spec; n=128, savephases=false, verbose=false).images
+extended_imgs = simulate_images(extended_sky, atm, img_spec; n=128).images
 nothing # hide
 ```
 
@@ -104,18 +106,19 @@ each true-sky model. The point source recovers the long-exposure PSF, while the 
 each convolved with that same PSF:
 
 ```@example true_sky
-hmap_kws = (; colormap=:jet, aspect_ratio=:equal, cbar=false)
-img_average(imgs) = dropdims(mean(imgs, dims=3), dims=3)
+img_avg(imgs) = dropdims(mean(imgs, dims=3), dims=3)
+heatmap_kws(title) = (; colormap=:jet, axis=(; aspect=DataAspect(), title=title,
+    xticks=Int[], yticks=Int[]))
 
-plot(
-    heatmap(point_imgs[:, :, 1]; title="Point — single", hmap_kws...),
-    heatmap(double_imgs[:, :, 1]; title="Binary — single", hmap_kws...),
-    heatmap(extended_imgs[:, :, 1]; title="Extended — single", hmap_kws...),
-    heatmap(img_average(point_imgs); title="Point — average", hmap_kws...),
-    heatmap(img_average(double_imgs); title="Binary — average", hmap_kws...),
-    heatmap(img_average(extended_imgs); title="Extended — average", hmap_kws...),
-    layout=(2, 3), size=(1200, 800)
-)
+fig = Figure(size=(1200, 800))
+for (col, (imgs, label)) in enumerate(zip(
+        (point_imgs, double_imgs, extended_imgs),
+        ("Point", "Binary", "Extended"),
+    ))
+    heatmap(fig[1, col], imgs[:, :, 1]; heatmap_kws("$label — single")...)
+    heatmap(fig[2, col], img_avg(imgs); heatmap_kws("$label — average")...)
+end
+fig
 ```
 
 ## Variable exposure times
@@ -129,11 +132,11 @@ which replays a sequence of phase screens from an array. First, generate a large
 padding so that the wind shift fits inside it:
 
 ```@example variable_exposure
-using AtmosphericTurbulenceSimulator, Plots
+using AtmosphericTurbulenceSimulator, CairoMakie
 # r0 = 0.2 m, aperture d = 2 m represented on 64 pixels → r0 in same units as d
 atm = SingleLayer(0.2, interpolate=:auto)
-phases = simulate_phases(atm, (128, 128); n=1, d=4, verbose=false)  # 128-pixel buffer → 4 m diameter
-heatmap(phases[:, :, 1], title="Phase screen", colormap=:viridis, aspect_ratio=:equal)
+phases = simulate_phases(atm, (128, 128); n=1, d=4)  # 128-pixel buffer → 4 m diameter
+nothing # hide
 ```
 
 Then run several simulations with increasing exposure time using the same saved phase screen.
@@ -141,20 +144,24 @@ The screen is automatically cropped to the 64-pixel aperture grid and shifted by
 ``v \times t_\text{exp}`` in physical units, converted to pixels via `d`:
 
 ```@example variable_exposure
-atm_saved = SavedPhases(phases; wind_velocity=(0.4, 0.4))   # 0.55 m/s on a 64-px/2-m grid
+atm_saved = SavedPhases(phases; wind_velocity=(4, 4))   # 5.5 m/s on a 64-px/2-m grid
 ap = CircularAperture((64, 64), 31)
 img_spec_base = ImagingSpec(ap, PhotonCount(Inf); d=2)
-img_shrt  = simulate_images(atm_saved, img_spec_base; n=1).images[:, :, 1]
-img_medi = simulate_images(atm_saved,                     # vt = 0.55 m/s × 0.5 s = 0.275 m shift
+img_shrt = simulate_images(atm_saved, img_spec_base; n=1).images[:, :, 1]
+img_medi = simulate_images(atm_saved,                      # vt = 5.5 m/s × 0.05 s = 0.275 m shift
+    ImagingSpec(ap, PhotonCount(Inf); d=2, exposure=Exposure(0.05, 10)); n=1).images[:, :, 1]
+img_long = simulate_images(atm_saved,                      # vt = 5.5 m/s × 0.5 s = 2.75 m shift
     ImagingSpec(ap, PhotonCount(Inf); d=2, exposure=Exposure(0.5, 10)); n=1).images[:, :, 1]
-img_long   = simulate_images(atm_saved,                 # vt = 0.55 m/s × 5 s = 2.75 m shift
-    ImagingSpec(ap, PhotonCount(Inf); d=2, exposure=Exposure(5, 10)); n=1).images[:, :, 1]
 
-hmap_kws = (; colormap=:jet, aspect_ratio=:equal, cbar=false, clims=(0, maximum(img_shrt)))
-p1 = heatmap(img_shrt;  title="Short exposure",  hmap_kws...)
-p2 = heatmap(img_medi; title="Medium exposure", hmap_kws...)
-p3 = heatmap(img_long; title="Long exposure",   hmap_kws...)
-plot(p1, p2, p3, layout=(1, 3), size=(1200, 450))
+heatmap_kws(title) = (;colormap=:jet, colorrange=(0, maximum(img_shrt)), 
+    axis=(;aspect=DataAspect(), title=title, xticks=Int[], yticks=Int[]))
+fig = Figure(size=(900, 900))
+heatmap(fig[1, 1], phases[:, :, 1]; heatmap_kws("Phase screen")..., 
+    colormap=:viridis, colorrange=Makie.automatic)
+heatmap(fig[2, 1], img_shrt; heatmap_kws("Instant")...)
+heatmap(fig[1, 2], img_medi; heatmap_kws("0.05 s")...)
+heatmap(fig[2, 2], img_long; heatmap_kws("0.5 s")...)
+fig
 ```
 
 ## HDF5 Output
@@ -170,8 +177,8 @@ img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2)
 atm1 = SingleLayer(0.1; interpolate=:auto)
 atm2 = SingleLayer(0.4; interpolate=:auto)
 
-simulate_images(atm1, img_spec; n=16, verbose=false, file=HDF5File("images.h5", "bad_seeing"))
-simulate_images(atm2, img_spec; n=16, verbose=false, file=HDF5File("images.h5", "good_seeing"))
+simulate_images(atm1, img_spec; n=16, file=HDF5File("images.h5", "bad_seeing"))
+simulate_images(atm2, img_spec; n=16, file=HDF5File("images.h5", "good_seeing"))
 
 h5open("images.h5", "r") do h5  # display the file structure
     show(stdout, "text/plain", h5)

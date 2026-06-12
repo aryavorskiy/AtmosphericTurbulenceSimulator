@@ -36,19 +36,22 @@ The main entry point is [`simulate_images`](@ref), which takes these pieces and 
 images.
 
 ```@example quick_start
-using AtmosphericTurbulenceSimulator, Plots
+using AtmosphericTurbulenceSimulator, CairoMakie
 
 aperture = CircularAperture((64, 64), 30)
 img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2, filter=FilterSpec(550, bandwidth=40))
 atm = SingleLayer(0.1; interpolate=:auto)
 
-result = simulate_images(atm, img_spec; n=8, verbose=false)
+result = simulate_images(atm, img_spec; n=8)
 
-p = plot(layout=(2, 4), size=(1600, 800))
-for i in 1:8
-    heatmap!(p[i], result.images[:, :, i], cmap=:jet, cbar=false, clim=extrema(result.images), aspect_ratio=:equal)
+clims = extrema(result.images)
+fig = Figure(size=(1600, 800))
+for (i, I) in enumerate(CartesianIndices((2, 4)))
+    ax = Axis(fig[I[1], I[2]]; aspect=DataAspect())
+    heatmap!(ax, result.images[:, :, i]; colormap=:jet, colorrange=clims)
+    hidedecorations!(ax)
 end
-p
+fig
 ```
 
 For larger simulations, specify the `file` keyword argument to write results directly to disk. 
