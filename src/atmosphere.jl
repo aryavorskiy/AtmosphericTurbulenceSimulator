@@ -279,7 +279,7 @@ function samplephases!(harding::HardingInterpolator)
 end
 
 """
-    SavedPhases(dataset[; wind_velocity, base_wavelength])
+    SavedPhases(dataset[, d]; wind_velocity, base_wavelength, grid_step)
 
 An `AtmosphereSpec` that reuses phase screens saved in a dataset.
 
@@ -290,22 +290,30 @@ available, an error is thrown, there is no guarantee what is in the tail of the 
 # Arguments
 - `dataset`: a 3D array-like containing phase screens with dimensions `(nx, ny, nframes)`.
   This can be an in-memory array or an HDF5 dataset (e.g. `HDF5.Dataset`).
+- `d`: aperture diameter of the saved phase screens (in the same units as ``r_0``). Optional;
+  when omitted grid step defaults to `1` (one pixel = one unit). Overriden by `grid_step`.
 
 # Keyword Arguments
 - `base_wavelength`: reference wavelength in nm used to scale phase screens when a multi-wavelength
   `FilterSpec` is used (default 550 nm).
 - `wind_velocity`: two-component `(vx, vy)` wind velocity used for long-exposure offsets in
   imaging simulations (default `(0, 0)`).
+- `grid_step`: physical size of one aperture pixel in the same units as ``r_0``. Overrides the
+  value derived from `d` when provided.
 """
-struct SavedPhases{T<:Real,D,WT,WL} <: AtmosphereSpec{T}
+struct SavedPhases{T<:Real,D,WT,WL,GT} <: AtmosphereSpec{T}
     dataset::D
     wind_velocity::NTuple{2,WT}
     base_wavelength::WL
+    grid_step::GT
 end
-function SavedPhases(dataset; wind_velocity::NTuple{2,<:Real}=(0, 0), base_wavelength=DEFAULT_WAVELEN)
+function SavedPhases(dataset, d::Number=maximum(size(dataset)[1:2]);
+        wind_velocity::NTuple{2,<:Real}=(0, 0), base_wavelength=DEFAULT_WAVELEN,
+        grid_step=d/maximum(size(dataset)[1:2]))
     T = eltype(dataset)
     WT = typeof(wind_velocity[1])
-    return SavedPhases{T,typeof(dataset),WT,typeof(base_wavelength)}(dataset, wind_velocity, base_wavelength)
+    return SavedPhases{T,typeof(dataset),WT,typeof(base_wavelength),typeof(grid_step)}(
+        dataset, wind_velocity, base_wavelength, grid_step)
 end
 
 mutable struct SavedPhaseBuffers{BDT, BT, CT}
@@ -317,10 +325,11 @@ end
 plate_size(sampler::SavedPhaseBuffers) = size(sampler.out_array)[1:2]
 batch_length(sampler::SavedPhaseBuffers) = size(sampler.out_array, 3)
 phase_type(sampler::SavedPhaseBuffers) = eltype(sampler.out_array)
-function prepare_phasebuffers(spec::SavedPhases{T}, plate_size::NTuple{2,Int}, plate_step::Number,
-        batch::Int, deviceadapter) where T
-    plate_step ≈ 1 ||
-        @warn "Diameter setting is ignored for `SavedPhases`"
+function prepare_phasebuffers(spec::SavedPhases{T}, plate_size::NTuple{2,Int},
+        grid_step::Number, batch::Int, deviceadapter) where T
+    !(spec.grid_step ≈ 1) && spec.grid_step != grid_step && throw(ArgumentError(
+        "Saved phase dataset has grid step $(spec.grid_step), but $grid_step was requested."
+    ))
     saved_size = size(spec.dataset)::NTuple{3,Int}
     saved_plate_size = saved_size[1:2]
     all(saved_plate_size .>= plate_size) || throw(ArgumentError(

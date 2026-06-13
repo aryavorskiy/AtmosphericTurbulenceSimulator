@@ -186,36 +186,36 @@ If `img_size` does not match the aperture’s Nyquist grid, the aperture is zero
 """
 struct ImagingSpec{T, T2, AT<:AbstractMatrix{T}, FST<:FilterSpec}
     aperture::AT
-    aperture_diameter::T2
+    grid_step::T2
     photon_count::PhotonCount{T}
     filter_spec::FST
     exposure::Exposure
     img_size::NTuple{2,Int}
     function ImagingSpec(
         aperture::AbstractMatrix{T},
-        aperture_diameter::Number,
+        grid_step::Number,
         photon_count::PhotonCount{T},
         filter_spec::FilterSpec,
         exposure::Exposure,
         img_size::NTuple{2,Int}) where T<:Real
-        new{T, typeof(aperture_diameter), typeof(aperture), typeof(filter_spec)}(
-            aperture, aperture_diameter, photon_count, filter_spec, exposure, img_size)
+        new{T, typeof(grid_step), typeof(aperture), typeof(filter_spec)}(
+            aperture, grid_step, photon_count, filter_spec, exposure, img_size)
     end
 end
 
 """
-    ImagingSpec([T, ]aperture, photon_count[; filter, nyquist_oversample, img_size])
-    ImagingSpec([T, ]aperture; nphotons, [background, filter, nyquist_oversample, img_size])
+    ImagingSpec([T, ]aperture, d, photon_count[; grid_step, filter, nyquist_oversample, img_size])
 
 Create an imaging system specification.
 
 # Arguments
 - `T`: desired number type, inferred from `aperture` if not provided.
 - `aperture`: 2D aperture (pupil) array describing the telescope pupil.
+- `d`: aperture diameter in the same units as ``r_0``. Used to compute `grid_step` as
+  `d / maximum(size(aperture))`.
 - `photon_count`: `PhotonCount` instance describing the photon budget and background.
 
 # Keyword Arguments
-- `d`: aperture diameter (in the same units as ``r_0``).
 - `filter`: `FilterSpec` describing sampled wavelengths and their relative intensities.
   Defaults to a monochromatic filter.
 - `exposure`: a number or an [`Exposure`](@ref) instance describing the exposure time and number of
@@ -225,15 +225,15 @@ Create an imaging system specification.
 - `img_size`: explicit output image size `(nx, ny)`. If not provided, computed from aperture size
   and `nyquist_oversample`.
 """
-function ImagingSpec(aperture::AbstractMatrix{T}, photon_count::PhotonCount;
-    filter::FilterSpec=MonoFilterSpec(), nyquist_oversample::Real=1,
-    exposure::Union{Exposure,Number}=0, d=maximum(size(aperture)),
+function ImagingSpec(aperture::AbstractMatrix{T}, d::Number, photon_count::PhotonCount;
+    filter::FilterSpec=MonoFilterSpec(),
+    nyquist_oversample::Real=1, exposure::Union{Exposure,Number}=0,
     img_size::NTuple{2,Int}=round.(Int, size(aperture) .* 2 .* nyquist_oversample)) where T<:Real
     pc = convert(PhotonCount{T}, photon_count)
     ex = exposure isa Number ? Exposure(exposure) : exposure
-    return ImagingSpec(aperture, d, pc, filter, ex, img_size)
+    return ImagingSpec(aperture, d/maximum(size(aperture)), pc, filter, ex, img_size)
 end
-function ImagingSpec(aperture::AbstractMatrix; nphotons, background=nothing, kw...)
+function ImagingSpec(aperture::AbstractMatrix, d; nphotons, background=nothing, kw...)
     Base.depwarn("`ImagingSpec(ap; nphotons=..., background=...)` is deprecated and will be \
         removed in v0.5. Use `ImagingSpec(ap, PhotonCount(nphotons, background))` instead.", :ImagingSpec)
     if background === nothing
@@ -241,17 +241,16 @@ function ImagingSpec(aperture::AbstractMatrix; nphotons, background=nothing, kw.
     else
         pc = PhotonCount(nphotons, background)
     end
-    ImagingSpec(aperture, pc; kw...)
+    ImagingSpec(aperture, d, pc; kw...)
 end
 ImagingSpec(::Type{T}, aperture::AbstractMatrix, args...; kw...) where T<:Real =
     ImagingSpec(convert.(T, aperture), args...; kw...)
 
 Adapt.adapt_structure(to, img_spec::ImagingSpec) =
-    ImagingSpec(Adapt.adapt_storage(to, img_spec.aperture), img_spec.aperture_diameter,
+    ImagingSpec(Adapt.adapt_storage(to, img_spec.aperture), img_spec.grid_step,
     img_spec.photon_count, img_spec.filter_spec, img_spec.exposure, img_spec.img_size)
 plate_size(img_spec::ImagingSpec) = size(img_spec.aperture)
 image_size(img_spec::ImagingSpec) = img_spec.img_size
-ap_step(img_spec::ImagingSpec) = img_spec.aperture_diameter / maximum(plate_size(img_spec))
 psf_norm(img_spec::ImagingSpec) = sum(abs2, img_spec.aperture) * prod(img_spec.img_size) *
         sum(img_spec.filter_spec.intensities)
 
@@ -335,7 +334,7 @@ function compute_images!(readout_to, opt_buffer::OpticalBuffers, spec::ImagingSp
 end
 
 """
-    CircularAperture([T, ]sz, radius[; aa_dist=1])
+    CircularAperture([T, ]sz, [radius; aa_dist=1])
 
 Create a circular (optionally anti-aliased) aperture array of shape `sz`. Returns a 2D
 numeric array suitable for use as an aperture in `ImagingSpec`.
@@ -366,7 +365,7 @@ CircularAperture(sz::NTuple{2}, radius=minimum((sz .- 1) .÷ 2); kw...) =
     CircularAperture(Float64, sz, radius; kw...)
 
 function padded_plate_size(atm_spec::AtmosphereSpec, img_spec::ImagingSpec)
-    max_offset = atm_spec.wind_velocity .* img_spec.exposure.exptime ./ ap_step(img_spec)
+    max_offset = atm_spec.wind_velocity .* img_spec.exposure.exptime ./ img_spec.grid_step
     return plate_size(img_spec) .+ ceil.(Int, abs.(max_offset))
 end
 function long_exp_offsets(atm_spec::AtmosphereSpec, img_spec::ImagingSpec)
@@ -374,7 +373,7 @@ function long_exp_offsets(atm_spec::AtmosphereSpec, img_spec::ImagingSpec)
     if n == 1 || iszero(img_spec.exposure.exptime) || all(iszero, atm_spec.wind_velocity)
         offset_list = [atm_spec.wind_velocity .* img_spec.exposure.exptime .* 0]
     else
-        offset_list = [atm_spec.wind_velocity .* (img_spec.exposure.exptime * j / (n - 1) / ap_step(img_spec)) for j in 0:n-1]
+        offset_list = [atm_spec.wind_velocity .* (img_spec.exposure.exptime * j / (n - 1) / img_spec.grid_step) for j in 0:n-1]
     end
     if img_spec.exposure.round_offsets
         offset_list = [round.(offset) for offset in offset_list]
@@ -407,7 +406,7 @@ function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int,
         opt_bufs[i] = OpticalBuffers(T, img_spec_adapt, phs_factors, length(chunk_ranges[i]))
     end
     return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec),
-            ap_step(img_spec), batch, adapter),
+            img_spec.grid_step, batch, adapter),
         ImgBufParallel(opt_bufs, chunk_ranges, img_spec_adapt, psf_norm(img_spec),
             long_exp_offsets(atm_spec, img_spec), img_array, phs_factors)
 end

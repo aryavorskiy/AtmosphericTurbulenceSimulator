@@ -49,7 +49,7 @@ function simulation_run(file, phsbuffers, imgbuffers, true_sky_adapt, n;
 end
 
 """
-    simulate_phases(atm_spec::AtmosphereSpec, plate_size; n, [batch, file, verbose, deviceadapter])
+    simulate_phases(atm_spec::AtmosphereSpec, plate_size[, d]; n, [grid_step, batch, file, verbose, deviceadapter])
 
 Simulate `n` phase screens using the provided atmosphere specification and write
 the results to an HDF5 file.
@@ -57,10 +57,13 @@ the results to an HDF5 file.
 # Arguments
 - `atm_spec`: an `AtmosphereSpec` used to produce phase screens.
 - `plate_size`: the size of the phase screens to simulate.
+- `d`: aperture diameter of the saved phase screens (in the same units as ``r_0``). Optional;
+  when omitted grid step defaults to `1` (one pixel = one unit). Overriden by `grid_step`.
 
 # Keyword Arguments
 - `n`: number of phase screens to simulate.
-- `d`: diameter setting for the phase screen generation (in the same units as ``r_0``). Defaults to the maximum of `plate_size`.
+- `grid_step`: physical size of one aperture pixel in the same units as ``r_0``. Overrides
+  the value derived from `d` when provided.
 - `batch`: batch size for buffered computations and HDF5 writes (default 128).
 - `file`: output options. Can be a string (filename) or an `HDF5File` object. If set to `nothing`
     (default), no file is written and the phases are returned as an array.
@@ -68,10 +71,18 @@ the results to an HDF5 file.
 - `deviceadapter`: adapter for device-backed arrays (defaults to `Array`). To use GPU arrays,
   pass e.g. `CUDA.CuArray` here (requires CUDA.jl).
 """
-function simulate_phases(atm_spec::AtmosphereSpec, plate_size; n::Int, d=maximum(plate_size),
-        batch::Int=DEFAULT_BATCH, file=nothing, verbose=true, deviceadapter=Array)
+function simulate_phases(atm_spec::AtmosphereSpec, plate_size, d=nothing; n::Int,
+        grid_step::Union{Nothing,Number}=nothing, batch::Int=DEFAULT_BATCH, file=nothing,
+        verbose=true, deviceadapter=Array)
+    if grid_step === nothing
+        if d === nothing
+            atm_spec isa SavedPhases || throw(ArgumentError(
+                "Either aperture diameter `d` or `grid_step` must be provided."))
+        end
+        grid_step = d / maximum(plate_size)
+    end
     batch = min(batch, n)
-    phase_buffers = prepare_phasebuffers(atm_spec, plate_size, d / maximum(plate_size), batch, deviceadapter)
+    phase_buffers = prepare_phasebuffers(atm_spec, plate_size, grid_step, batch, deviceadapter)
     simulation_run(file, phase_buffers, nothing, nothing, n; verbose=verbose)
 end
 
