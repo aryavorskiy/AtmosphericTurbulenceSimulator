@@ -57,7 +57,7 @@ Concrete specs: `SingleLayer` (KL decomposition + optional Harding interpolation
 `ImagingSpec` + `AtmosphereSpec` → `prepare_buffers(T, atm_spec, img_spec, batch, deviceadapter)`
 → `(phase_buffers, image_buffers)` → `compute_images!(image_buffers, phases, true_sky)`.
 
-`prepare_buffers` always returns `ImgBufParallel`, which owns a `Vector{OpticalBuffers}` (one per
+`prepare_buffers` always returns `SimulationBuffers`, which owns a `Vector{OpticalBuffers}` (one per
 worker thread). Single-thread execution is handled as a special case inside `compute_images!`
 rather than a separate type. The `deviceadapter` argument is wrapped in `MultiThreaded` if it
 isn't one already, so passing e.g. `CuArray` still works.

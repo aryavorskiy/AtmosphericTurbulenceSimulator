@@ -233,16 +233,6 @@ function ImagingSpec(aperture::AbstractMatrix{T}, d::Number, photon_count::Photo
     ex = exposure isa Number ? Exposure(exposure) : exposure
     return ImagingSpec(aperture, d/maximum(size(aperture)), pc, filter, ex, img_size)
 end
-function ImagingSpec(aperture::AbstractMatrix, d; nphotons, background=nothing, kw...)
-    Base.depwarn("`ImagingSpec(ap; nphotons=..., background=...)` is deprecated and will be \
-        removed in v0.5. Use `ImagingSpec(ap, PhotonCount(nphotons, background))` instead.", :ImagingSpec)
-    if background === nothing
-        pc = PhotonCount(nphotons)
-    else
-        pc = PhotonCount(nphotons, background)
-    end
-    ImagingSpec(aperture, d, pc; kw...)
-end
 ImagingSpec(::Type{T}, aperture::AbstractMatrix, args...; kw...) where T<:Real =
     ImagingSpec(convert.(T, aperture), args...; kw...)
 
@@ -382,7 +372,7 @@ function long_exp_offsets(atm_spec::AtmosphereSpec, img_spec::ImagingSpec)
     return [BilinearShift(img_spec.aperture, offset .- mins) for offset in offset_list]
 end
 
-struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT,CT,VT}
+struct SimulationBuffers{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT,CT,VT}
     opt_bufs::Vector{BT}
     chunk_ranges::Vector{CT}
     spec::ST
@@ -391,8 +381,8 @@ struct ImgBufParallel{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT,CT,VT}
     img_array::AT
     phs_factors::VT
 end
-image_size(img_buf::ImgBufParallel) = image_size(img_buf.opt_bufs[1])
-image_type(img_buf::ImgBufParallel) = eltype(img_buf.img_array)
+image_size(img_buf::SimulationBuffers) = image_size(img_buf.opt_bufs[1])
+image_type(img_buf::SimulationBuffers) = eltype(img_buf.img_array)
 function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int, adapter::MultiThreaded) where T
     nbufs = min(adapter.nworkers, batch)
     chunk_ranges = collect(chunks(1:batch; n=nbufs))
@@ -407,12 +397,12 @@ function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int,
     end
     return prepare_phasebuffers(atm_spec, padded_plate_size(atm_spec, img_spec),
             img_spec.grid_step, batch, adapter),
-        ImgBufParallel(opt_bufs, chunk_ranges, img_spec_adapt, psf_norm(img_spec),
+        SimulationBuffers(opt_bufs, chunk_ranges, img_spec_adapt, psf_norm(img_spec),
             long_exp_offsets(atm_spec, img_spec), img_array, phs_factors)
 end
 prepare_buffers(type, atm_spec, img_spec, batch, A) =
     prepare_buffers(type, atm_spec, img_spec, batch, MultiThreaded(A))
-function compute_images!(img_buf::ImgBufParallel, phases, true_sky)
+function compute_images!(img_buf::SimulationBuffers, phases, true_sky)
     if length(img_buf.chunk_ranges) == 1
         compute_images!(img_buf.img_array, only(img_buf.opt_bufs), img_buf.spec,
             img_buf.phs_factors, phases, true_sky, img_buf.offsets, img_buf.psf_norm)
