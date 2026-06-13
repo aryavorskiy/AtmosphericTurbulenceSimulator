@@ -10,9 +10,9 @@ using Random
         ts3 = TrueSkyImage(rand(32, 32))
 
         pc = PhotonCount(1e7, 0)
-        img_spec = ImagingSpec(ap, pc)
-        img_spec2 = ImagingSpec(ap, pc, filter=FilterSpec(bandwidth=0.1))
-        img_spec3 = ImagingSpec(ap, pc, filter=FilterSpec(bandwidth=0.1, tedge=0.5), exposure=Exposure(3, 5))
+        img_spec = ImagingSpec(ap, 16, pc)
+        img_spec2 = ImagingSpec(ap, 16, pc, filter=FilterSpec(bandwidth=0.1))
+        img_spec3 = ImagingSpec(ap, 16, pc, filter=FilterSpec(bandwidth=0.1, tedge=0.5), exposure=Exposure(3, 5))
 
         Random.seed!(123)
         for (ts, is) in zip((ts1, ts2, ts3), (img_spec, img_spec2, img_spec3))
@@ -38,7 +38,7 @@ using Random
 
     @testset "Continuous vs Poisson" begin
         # Continuous flux
-        img_spec_cont = ImagingSpec(ap, PhotonCount(Inf))
+        img_spec_cont = ImagingSpec(ap, 16, PhotonCount(Inf))
         ts_cont = PointSource()
         @test_throws ArgumentError simulate_images(Int32, ts_cont, atm, img_spec_cont; n=16)
 
@@ -47,7 +47,7 @@ using Random
         @test all(>=(-eps()), images_cont)
 
         # Poisson sampling
-        img_spec_poisson = ImagingSpec(ap, PhotonCount(1e6, 100))
+        img_spec_poisson = ImagingSpec(ap, 16, PhotonCount(1e6, 100))
         ts_poisson = PointSource()
         images_poisson = simulate_images(ts_poisson, atm, img_spec_poisson; n=16, file=nothing, verbose=false, deviceadapter=identity).images
 
@@ -57,7 +57,7 @@ using Random
 
     @testset "No phases" begin
         ts = PointSource()
-        img_spec_float = ImagingSpec(ap, PhotonCount(Inf))
+        img_spec_float = ImagingSpec(ap, 16, PhotonCount(Inf))
 
         tmpfile = tempname() * ".h5"
         simulate_images(Float32, ts, atm, img_spec_float; n=16, file=tmpfile, savephases=false,
@@ -73,7 +73,7 @@ using Random
 
     @testset "Saved phases" begin
         tmpfile = tempname() * ".h5"
-        img_spec1 = ImagingSpec(ap, PhotonCount(Inf))
+        img_spec1 = ImagingSpec(ap, 16, PhotonCount(Inf))
         simulate_images(atm, img_spec1, n=10, file=tmpfile)
         img1 = h5read(tmpfile, "images")
         img2 = h5open(tmpfile, "r") do fid
@@ -83,14 +83,14 @@ using Random
         rm(tmpfile, force=true)
         @test img1 == img2
 
-        img_spec2 = ImagingSpec(ap, PhotonCount(Inf), exposure=Exposure(3, 3))
+        img_spec2 = ImagingSpec(ap, 16, PhotonCount(Inf), exposure=Exposure(3, 3))
         res_e = simulate_images(atm, img_spec2, n=10)
         img_e1 = res_e.images
         img_e2 = simulate_images(SavedPhases(res_e.phases; wind_velocity=(1, 1)), img_spec2,
             n=10, batch=7, verbose=false).images
         @test img_e1 == img_e2
 
-        img_spec3 = ImagingSpec(ap, PhotonCount(1e6, 100), exposure=Exposure(3, 3))
+        img_spec3 = ImagingSpec(ap, 16, PhotonCount(1e6, 100), exposure=Exposure(3, 3))
         phs, img_d1 = simulate_images(atm, img_spec3, n=10, batch=7, verbose=false)
         Random.seed!(123)
         img_d2 = simulate_images(SavedPhases(phs; wind_velocity=(1, 1)), img_spec3,
@@ -107,13 +107,13 @@ using Random
 
     @testset "Aperture diameter" begin
         # 4 m aperture, 1 m r_0, 3 sqrt(2)/4 m/s wind velocity, 1 s exposure
-        img_spec1 = ImagingSpec(ap, PhotonCount(Inf), d=4, exposure=1)
+        img_spec1 = ImagingSpec(ap, 4, PhotonCount(Inf), exposure=1)
         atm1 = SingleLayer(1, wind_velocity=(0.75, 0.75), interpolate=:auto)
         Random.seed!(123)
         res1 = simulate_images(atm1, img_spec1, n=10, verbose=false)
 
         # 2 m aperture, 0.5 m r_0, sqrt(2)/8 m/s wind velocity, 3 s exposure
-        img_spec2 = ImagingSpec(ap, PhotonCount(Inf), d=2, exposure=3)
+        img_spec2 = ImagingSpec(ap, 2, PhotonCount(Inf), exposure=3)
         atm2 = SingleLayer(0.5, wind_velocity=(0.125, 0.125), interpolate=:auto)
         Random.seed!(123)
         res2 = simulate_images(atm2, img_spec2, n=10, verbose=false)

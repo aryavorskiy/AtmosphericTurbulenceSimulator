@@ -78,8 +78,10 @@ function simulate_phases(atm_spec::AtmosphereSpec, plate_size, d=nothing; n::Int
         if d === nothing
             atm_spec isa SavedPhases || throw(ArgumentError(
                 "Either aperture diameter `d` or `grid_step` must be provided."))
+            grid_step = atm_spec.grid_step === nothing ? 1 : atm_spec.grid_step
+        else
+            grid_step = d / maximum(plate_size)
         end
-        grid_step = d / maximum(plate_size)
     end
     batch = min(batch, n)
     phase_buffers = prepare_phasebuffers(atm_spec, plate_size, grid_step, batch, deviceadapter)

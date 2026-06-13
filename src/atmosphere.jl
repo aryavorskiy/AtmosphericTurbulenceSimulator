@@ -307,13 +307,15 @@ struct SavedPhases{T<:Real,D,WT,WL,GT} <: AtmosphereSpec{T}
     base_wavelength::WL
     grid_step::GT
 end
-function SavedPhases(dataset, d::Number=maximum(size(dataset)[1:2]);
+function SavedPhases(dataset, d::Union{Number,Nothing}=nothing;
         wind_velocity::NTuple{2,<:Real}=(0, 0), base_wavelength=DEFAULT_WAVELEN,
-        grid_step=d/maximum(size(dataset)[1:2]))
+        grid_step=nothing)
     T = eltype(dataset)
     WT = typeof(wind_velocity[1])
-    return SavedPhases{T,typeof(dataset),WT,typeof(base_wavelength),typeof(grid_step)}(
-        dataset, wind_velocity, base_wavelength, grid_step)
+    grid_step_final = grid_step !== nothing ? grid_step :
+        d !== nothing ? d / maximum(size(dataset)[1:2]) : nothing
+    return SavedPhases{T,typeof(dataset),WT,typeof(base_wavelength),typeof(grid_step_final)}(
+        dataset, wind_velocity, base_wavelength, grid_step_final)
 end
 
 mutable struct SavedPhaseBuffers{BDT, BT, CT}
@@ -327,7 +329,7 @@ batch_length(sampler::SavedPhaseBuffers) = size(sampler.out_array, 3)
 phase_type(sampler::SavedPhaseBuffers) = eltype(sampler.out_array)
 function prepare_phasebuffers(spec::SavedPhases{T}, plate_size::NTuple{2,Int},
         grid_step::Number, batch::Int, deviceadapter) where T
-    !(spec.grid_step ≈ 1) && spec.grid_step != grid_step && throw(ArgumentError(
+    spec.grid_step !== nothing && (spec.grid_step != grid_step) && throw(ArgumentError(
         "Saved phase dataset has grid step $(spec.grid_step), but $grid_step was requested."
     ))
     saved_size = size(spec.dataset)::NTuple{3,Int}
