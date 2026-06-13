@@ -10,16 +10,17 @@ CurrentModule = AtmosphericTurbulenceSimulator
 
 ## Phase Screen Generation
 
-Create a [`SingleLayer`](@ref) atmosphere by specifying the Fried parameter ``r_0``. The `d` keyword
-on [`simulate_phases`](@ref) (and [`ImagingSpec`](@ref)) sets the aperture diameter in the same
-units, so that ``r_0`` and `d` share a common physical scale. For a 2 m telescope represented on a
-64-pixel pupil grid with ``r_0 = 0.2`` m:
+Create a [`SingleLayer`](@ref) atmosphere by specifying the Fried parameter ``r_0``. Use 
+[`simulate_phases`](@ref) to generate phase screens with the selected model; you will need to specify 
+the grid size and the physical scale of the aperture.
+
+For a 2 m window represented on a 64-pixel pupil grid with ``r_0 = 0.2`` m:
 
 ```@example phase_generation
 using AtmosphericTurbulenceSimulator
 
 atm = SingleLayer(0.2; interpolate=:auto)   # r0 = 0.2 m
-phases = simulate_phases(atm, (64, 64); n=512, d=2)  # d = 2 m aperture
+phases = simulate_phases(atm, (64, 64), 2; n=512)   # d = 2 m aperture
 nothing # hide
 ```
 
@@ -82,8 +83,8 @@ ships three true-sky models:
 using AtmosphericTurbulenceSimulator
 using CairoMakie, Statistics
 
-aperture = CircularAperture((64, 64), 30)
-img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2, filter=FilterSpec(550, bandwidth=40))
+aperture = CircularAperture((64, 64))
+img_spec = ImagingSpec(aperture, 2, PhotonCount(1e7, 200); filter=FilterSpec(550, bandwidth=40))
 atm = SingleLayer(0.2; interpolate=:auto)
 
 point_imgs = simulate_images(atm, img_spec; n=128).images
@@ -143,8 +144,8 @@ atm = SingleLayer(0.2; interpolate=:auto)
 filter_vis = FilterSpec(550; bandwidth=40)
 filter_nir = FilterSpec(820; bandwidth=40)
 
-img_spec_vis = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2, filter=filter_vis)
-img_spec_nir = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2, filter=filter_nir)
+img_spec_vis = ImagingSpec(aperture, 2, PhotonCount(1e7, 200); filter=filter_vis)
+img_spec_nir = ImagingSpec(aperture, 2, PhotonCount(1e7, 200); filter=filter_nir)
 
 phases, imgs_vis = simulate_images(atm, img_spec_vis; n=128)
 imgs_nir = simulate_images(SavedPhases(phases), img_spec_nir; n=128).images
@@ -174,7 +175,7 @@ fig
 
 To simulate long exposures you need non-zero wind velocity on the atmosphere spec and non-zero
 exposure time on the [`ImagingSpec`](@ref). Wind velocity is expressed in the same physical units
-as ``r_0`` and the aperture diameter `d` per unit time.
+as ``r_0`` and `grid_step` per unit time.
 
 In this example we combine a variable exposure with the [`SavedPhases`](@ref) atmosphere spec,
 which replays a sequence of phase screens from an array. First, generate a large phase screen with
@@ -184,7 +185,7 @@ padding so that the wind shift fits inside it:
 using AtmosphericTurbulenceSimulator, CairoMakie
 # r0 = 0.2 m, aperture d = 2 m represented on 64 pixels → r0 in same units as d
 atm = SingleLayer(0.2, interpolate=:auto)
-phases = simulate_phases(atm, (128, 128); n=1, d=4)  # 128-pixel buffer → 4 m diameter
+phases = simulate_phases(atm, (128, 128); n=1, grid_step=2/64)
 nothing # hide
 ```
 
@@ -195,20 +196,20 @@ The screen is automatically cropped to the 64-pixel aperture grid and shifted by
 ```@example variable_exposure
 atm_saved = SavedPhases(phases; wind_velocity=(4, 4))   # 5.5 m/s on a 64-px/2-m grid
 ap = CircularAperture((64, 64), 31)
-img_spec_base = ImagingSpec(ap, PhotonCount(Inf); d=2)
+img_spec_base = ImagingSpec(ap, 2, PhotonCount(Inf))
 img_shrt = simulate_images(atm_saved, img_spec_base; n=1).images[:, :, 1]
 img_medi = simulate_images(atm_saved,                      # vt = 5.5 m/s × 0.05 s = 0.275 m shift
-    ImagingSpec(ap, PhotonCount(Inf); d=2, exposure=Exposure(0.05, 10)); n=1).images[:, :, 1]
+    ImagingSpec(ap, 2, PhotonCount(Inf); exposure=Exposure(0.05, 10)); n=1).images[:, :, 1]
 img_long = simulate_images(atm_saved,                      # vt = 5.5 m/s × 0.5 s = 2.75 m shift
-    ImagingSpec(ap, PhotonCount(Inf); d=2, exposure=Exposure(0.5, 10)); n=1).images[:, :, 1]
+    ImagingSpec(ap, 2, PhotonCount(Inf); exposure=Exposure(0.5, 10)); n=1).images[:, :, 1]
 
 heatmap_kws(title) = (;colormap=:jet, colorrange=(0, maximum(img_shrt)), 
     axis=(;aspect=DataAspect(), title=title, xticks=Int[], yticks=Int[]))
 fig = Figure(size=(800, 800))
 heatmap(fig[1, 1], phases[:, :, 1]; heatmap_kws("Phase screen")..., 
     colormap=:viridis, colorrange=Makie.automatic)
-heatmap(fig[2, 1], img_shrt; heatmap_kws("Instant")...)
-heatmap(fig[1, 2], img_medi; heatmap_kws("0.05 s")...)
+heatmap(fig[1, 2], img_shrt; heatmap_kws("Instant")...)
+heatmap(fig[2, 1], img_medi; heatmap_kws("0.05 s")...)
 heatmap(fig[2, 2], img_long; heatmap_kws("0.5 s")...)
 fig
 ```
@@ -222,7 +223,7 @@ using AtmosphericTurbulenceSimulator
 using HDF5
 
 aperture = CircularAperture((64, 64), 30)
-img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2)
+img_spec = ImagingSpec(aperture, 2, PhotonCount(1e7, 200))
 atm1 = SingleLayer(0.1; interpolate=:auto)
 atm2 = SingleLayer(0.4; interpolate=:auto)
 

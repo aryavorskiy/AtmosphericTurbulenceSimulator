@@ -57,8 +57,8 @@ the results to an HDF5 file.
 # Arguments
 - `atm_spec`: an `AtmosphereSpec` used to produce phase screens.
 - `plate_size`: the size of the phase screens to simulate.
-- `d`: aperture diameter of the saved phase screens (in the same units as ``r_0``). Optional;
-  when omitted grid step defaults to `1` (one pixel = one unit). Overriden by `grid_step`.
+- `d`: aperture diameter of the saved phase screens (in the same units as ``r_0``). When omitted,
+  tries to infer it from `atm_spec`, throws if it is not a `SavedPhases`. Overriden by `grid_step`.
 
 # Keyword Arguments
 - `n`: number of phase screens to simulate.

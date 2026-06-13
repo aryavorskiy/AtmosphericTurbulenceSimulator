@@ -39,7 +39,7 @@ images.
 using AtmosphericTurbulenceSimulator, CairoMakie
 
 aperture = CircularAperture((64, 64), 30)
-img_spec = ImagingSpec(aperture, PhotonCount(1e7, 200); d=2, filter=FilterSpec(550, bandwidth=40))
+img_spec = ImagingSpec(aperture, 2, PhotonCount(1e7, 200); filter=FilterSpec(550, bandwidth=40))
 atm = SingleLayer(0.1; interpolate=:auto)
 
 result = simulate_images(atm, img_spec; n=8)
@@ -69,11 +69,8 @@ D_\phi(r) = \big\langle (\phi(x) - \phi(x+r))^2 \big\rangle
 
 The Fried parameter ``r_0`` controls turbulence strength. Larger ``r_0`` means weaker phase
 aberrations. Pass ``r_0`` in the same physical units as the aperture diameter `d` (see below).
-
-The aperture diameter `d` — set via the `d` keyword of [`simulate_phases`](@ref) or
-[`ImagingSpec`](@ref) — defines the physical scale that maps pixels to the ``r_0`` units.
-It defaults to the maximum dimension of the phase-screen grid (i.e. one pixel = one unit), which
-is appropriate when ``r_0`` is already expressed in pixels.
+In several cases you can also set the grid step directly, which is the physical size of one pixel
+of the wavefront and also musi use the same units as ``r_0``.
 
 For large grids, [`SingleLayer`](@ref) can use Harding interpolation ([Harding et al. 1999](https://doi.org/10.1364/AO.38.002161)). 
 The phase is sampled on a smaller grid and then upsampled in a way that preserves Kolmogorov statistics. `interpolate=:auto`
@@ -87,7 +84,7 @@ default 550 nm) that sets the reference wavelength for broadband simulations.
 
 The parameters of the imaging system are defined by an [`ImagingSpec`](@ref) object, which includes the following fields:
 - The aperture function, which can be a predefined shape like [`CircularAperture`](@ref) or a user-defined array.
-- The aperture diameter `d` (keyword), in the same units as ``r_0``. Defaults to the maximum dimension of the aperture array (one pixel = one unit).
+- The aperture diameter `d`, in the same units as ``r_0`` in the atmosphere model.
 - The photon budget, defined by a [`PhotonCount`](@ref) object that specifies the total number of photons and background level.
 - The filter specification, defined by a [`FilterSpec`](@ref) that sets the wavelengths and relative intensities for non-monochromatic simulations.
 - The exposure time, which can be used to simulate long exposures by averaging multiple phase screens together. See [`Exposure`](@ref).

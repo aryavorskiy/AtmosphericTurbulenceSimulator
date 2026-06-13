@@ -32,7 +32,7 @@ using AtmosphericTurbulenceSimulator
 atm = SingleLayer(0.2; interpolate=:auto)
 
 # Generate phase screens and save to HDF5 (64-pixel grid with 2 m size)
-simulate_phases(atm, (64, 64); n=3000, d=2, file="phases.h5")
+simulate_phases(atm, (64, 64), 2; n=3000, file="phases.h5")
 ```
 
 The Harding interpolation (from [Harding et al. 1999](https://doi.org/10.1364/AO.38.002161))
@@ -47,7 +47,7 @@ specification and a true-sky model:
 ```julia
 # Define circular aperture and imaging parameters
 ap = CircularAperture((64, 64), 25)
-img_spec = ImagingSpec(ap, PhotonCount(1e6, 100), d=2)
+img_spec = ImagingSpec(ap, 2, PhotonCount(1e6, 100))
 
 # Atmosphere specification
 atm = SingleLayer(0.2, interpolate=:auto)
