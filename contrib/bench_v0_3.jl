@@ -14,7 +14,7 @@ using AtmosphericTurbulenceSimulator
 
 if abspath(PROGRAM_FILE) == @__FILE__
     length(ARGS) >= 1 || error("Usage: bench_v0_3.jl <version_tag> [output.csv]")
-    const VERSION_TAG = lcase(ARGS[1])
+    const VERSION_TAG = lowercase(ARGS[1])
     outfile = length(ARGS) >= 2 ? ARGS[2] : "results_$(VERSION_TAG).csv"
 else
     const VERSION_TAG = string(Base.pkgversion(AtmosphericTurbulenceSimulator))
@@ -23,7 +23,7 @@ end
 
 include(joinpath(@__DIR__, "benchmark_utils.jl"))
 
-atm = SingleLayer((99, 99), r0; interpolate=:auto)
+atm = SingleLayer((99, 99), r0 / DIAMETER * 99; interpolate=:auto)
 
 img_spec_mono = ImagingSpec(aperture, PhotonCount(Inf); img_size=(256, 256))
 img_spec_bb   = ImagingSpec(aperture, PhotonCount(Inf);

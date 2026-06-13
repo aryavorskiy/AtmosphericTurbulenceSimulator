@@ -1,14 +1,15 @@
 # Shared simulation parameters and benchmarking utilities
 
+aperture = CircularAperture(Float64, (99, 99))
+
 # Simulation parameters
-const SCALE    = 2 / 100
-const r0       = 0.2 / SCALE
-const WIND     = (45.0, 22.0) ./ SCALE   # wind velocity [px/time]  (v0.4+ only)
+const DIAMETER = 2
+const r0       = 0.2
+const WIND     = (45.0, 22.0)             # wind velocity [px/time]  (v0.4+ only)
 const EXPTIME  = 0.04                     # exposure time [time]      (v0.4+ only)
 const Ns       = [200, 400, 800, 1500, 3000, 6000, 12000, 20000]
 const BATCH    = 128
 
-aperture = CircularAperture(Float64, (99, 99))
 const TMPFILE = tempname() * ".h5"
 
 # Timing helper

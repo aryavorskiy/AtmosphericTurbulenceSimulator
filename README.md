@@ -46,7 +46,7 @@ specification and a true-sky model:
 
 ```julia
 # Define circular aperture and imaging parameters
-ap = CircularAperture((64, 64), 25)
+ap = CircularAperture((64, 64))
 img_spec = ImagingSpec(ap, 2, PhotonCount(1e6, 100))
 
 # Atmosphere specification

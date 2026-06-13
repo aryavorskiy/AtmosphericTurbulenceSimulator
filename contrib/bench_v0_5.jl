@@ -1,10 +1,10 @@
-# Benchmark for any v0.4.x release (v0.4.0, v0.4.1, HEAD, …)
+# Benchmark for any v0.5.x release
 #
 # Usage:
-#   julia -t 8 --project=<worktree>/test bench_v0_4.jl <version_tag> [output.csv]
+#   julia -t 8 --project=<worktree>/test bench_v0_5.jl <version_tag> [output.csv]
 #
 # Arguments:
-#   version_tag  – label written into the CSV (e.g. "v0.4.0", "v0.4.1", "head")
+#   version_tag  – label written into the CSV
 #   output.csv   – path for results (default: results_<version_tag>.csv)
 #
 # The three benchmark cases are:
@@ -15,7 +15,7 @@
 using AtmosphericTurbulenceSimulator
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    length(ARGS) >= 1 || error("Usage: bench_v0_4.jl <version_tag> [output.csv]")
+    length(ARGS) >= 1 || error("Usage: bench_v0_5.jl <version_tag> [output.csv]")
     const VERSION_TAG = lowercase(ARGS[1])
     outfile = length(ARGS) >= 2 ? ARGS[2] : "results_$(VERSION_TAG).csv"
 else
@@ -25,13 +25,13 @@ end
 
 include(joinpath(@__DIR__, "benchmark_utils.jl"))
 
-atm_nowind    = SingleLayer(r0 / DIAMETER * 99; interpolate=:auto)
-atm_wind      = SingleLayer(r0 / DIAMETER * 99; wind_velocity=WIND, interpolate=:auto)
+atm_nowind    = SingleLayer(r0; interpolate=:auto)
+atm_wind      = SingleLayer(r0; wind_velocity=WIND, interpolate=:auto)
 
-img_spec_mono = ImagingSpec(aperture, PhotonCount(Inf); img_size=(256, 256))
-img_spec_bb   = ImagingSpec(aperture, PhotonCount(Inf);
-                    filter=FilterSpec(1; bandwidth=0.1), img_size=(256, 256))
-img_spec_long = ImagingSpec(aperture, PhotonCount(Inf);
+img_spec_mono = ImagingSpec(aperture, DIAMETER, PhotonCount(Inf); img_size=(256, 256))
+img_spec_bb   = ImagingSpec(aperture, DIAMETER, PhotonCount(Inf);
+                    filter=FilterSpec(550; bandwidth=55), img_size=(256, 256))
+img_spec_long = ImagingSpec(aperture, DIAMETER, PhotonCount(Inf);
                     exposure=Exposure(EXPTIME, 7), img_size=(256, 256))
 
 cases = [
