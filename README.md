@@ -5,7 +5,7 @@
 [![codecov](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator.jl)
 [![JET](https://img.shields.io/badge/%F0%9F%9B%A9%EF%B8%8F_tested_with-JET.jl-233f9a)](https://github.com/aviatesk/JET.jl)
 
-A simple (yet) Julia toolchain to simulate atmospheric turbulence effects on imaging systems.
+A simple (yet) Julia toolchain for simulating atmospheric turbulence effects on imaging systems.
 
 ## Installation
 
@@ -102,11 +102,11 @@ To enable CUDA (or other GPU backends), import the respective packages (e.g., `C
 Please note that this package is in early development. There are multiple features planned for the future:
 - More advanced atmosphere models
     - [x] Harding interpolation
-    - [ ] Frozen flow
+    - [x] Frozen flow (long exposures)
+    - [ ] Frozen flow (time series)
     - [ ] Multi-layer atmospheres
 - Input/Output
     - [x] HDF5 support
-    - [ ] FITS support
     - [x] Phase loader
     - [ ] PSF loader for true-sky application
 - [x] Long exposures

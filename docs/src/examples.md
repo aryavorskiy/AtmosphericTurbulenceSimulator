@@ -51,11 +51,11 @@ ax2 = Axis(fig[1, 2];
     xscale=log10,
     yscale=log10,
     xticks=[1, 2, 5, 10, 20],
-    xminorticks=1:20,
+    xminorticks=1:10,
     xminorticksvisible=true,
 )
-scatter!(ax2, collect(seps), emp; label="empirical")
-lines!(ax2, collect(seps), theory; label=L"6.88\,(r/r_0)^{5/3}", linewidth=2, color=Cycled(2))
+scatter!(ax2, seps, emp; label="empirical")
+lines!(ax2, seps, theory; label=L"6.88\,(r/r_0)^{5/3}", linewidth=2, color=Cycled(2))
 axislegend(ax2; position=:lt)
 
 fig
@@ -169,7 +169,7 @@ fig
 ```
 
 !!! note
-    The angular resolution of the final images is determined by ``\delta \theta = \cdot \frac{\lambda_{base}}{2\alpha D}``, where ``\alpha`` is the Nyquist oversampling factor (default 1, see [`ImagingSpec`](@ref) manual for details).
+    The angular resolution of the final images is determined by ``\delta \theta = \frac{\lambda_{base}}{2\alpha D}``, where ``\alpha`` is the Nyquist oversampling factor (default 1, see [`ImagingSpec`](@ref) manual for details).
 
 ## Variable exposure times
 
