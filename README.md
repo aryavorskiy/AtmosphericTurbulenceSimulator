@@ -1,9 +1,9 @@
 # AtmosphericTurbulenceSimulator
 
-[![docs-dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aryavorskiy.github.io/AtmosphericTurbulenceSimulator.jl/dev/)
-[![CI](https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator.jl)
-[![JET](https://img.shields.io/badge/%F0%9F%9B%A9%EF%B8%8F_tested_with-JET.jl-233f9a)](https://github.com/aviatesk/JET.jl)
+| | | |
+|:---:|:---:|:---:|
+| [![docs-stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://aryavorskiy.github.io/AtmosphericTurbulenceSimulator.jl/stable/) | [![docs-dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aryavorskiy.github.io/AtmosphericTurbulenceSimulator.jl/dev/) | [![DOI](https://zenodo.org/badge/1108761097.svg)](https://doi.org/10.5281/zenodo.20734890) |
+| [![CI](https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl/actions/workflows/ci.yml)  | [![codecov](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/aryavorskiy/AtmosphericTurbulenceSimulator.jl) | [![JET](https://img.shields.io/badge/%F0%9F%9B%A9%EF%B8%8F_tested_with-JET.jl-233f9a)](https://github.com/aviatesk/JET.jl) |  |
 
 A simple (yet) Julia toolchain for simulating atmospheric turbulence effects on imaging systems.
 

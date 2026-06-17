@@ -1,0 +1,47 @@
+abstract: "<h2>Breaking changes</h2>\n<ul>\n<li><code>ImagingSpec</code> now requires\
+  \ aperture diameter <code>d</code> to be explicitly set.</li>\n<li><code>simulate_phases</code>\
+  \ and <code>SavedPhases</code> now accept aperture diameter<code>d</code> as an\
+  \ <strong>optional</strong> positional argument. <code>grid_step=\u2026</code> is\
+  \ also available, overriding the <code>d</code> argument. When none are provided,\
+  \ defaults to <code>grid_step = 1</code>.</li>\n<li>All atmosphere models now store\
+  \ <code>base_wavelength</code>to ensure correct scaling for multi-wavelength imaging.\
+  \ Default base wavelength is 550 nm.</li>\n<li><code>base_wavelength</code> field\
+  \ was removed from <code>FilterSpec</code>. The convenience constructor preserved\
+  \ the same signature.</li>\n<li>Deprecated methods for <code>ImagingSpec</code>\
+  \ and <code>HDF5File</code> are removed.</li>\n</ul>\n<h2>New features</h2>\n<ul>\n\
+  <li>Now the correct backend is selected by <code>MultiThreaded([adapter, nworkers])</code></li>\n\
+  <li>Harding interpolation now runs in parallel across CPU threads, reducing phase-generation\
+  \ time at large <code>N</code>.</li>\n<li><code>SingleLayer</code> and <code>SavedPhases</code>\
+  \ accept <code>base_wavelength</code> keyword (nm) for per-atmosphere reference\
+  \ wavelength control.</li>\n<li><code>SavedPhases</code> accepts optional positional\
+  \ <code>d</code> argument and <code>grid_step</code> keyword, enabling correct broadband\
+  \ replay of saved tasets.</li>\n</ul>\n<h2>Fixes</h2>\n<ul>\n<li>Fixed broadband\
+  \ phase scaling sign: wavelength ratio was inverted, producing wrong PSF width scaling\
+  \ across filter channels.</li>\n<li>Numerous performance improvements.</li>\n</ul>\n\
+  <h2>Internal changes</h2>\n<ul>\n<li><code>OpticalBuffers</code> no longer allocates\
+  \ along the wavelength dimension; each wavelength channel is processed sequentially\
+  \ through the same buffer, reducing peak memory usage for broadband simulations.</li>\n\
+  <li><code>ImgBufSerial</code> was removed; the single-threaded functionality is\
+  \ handled by <code>ImgBufParallel</code>, which is renamed to <code>SimulationBuffers</code></li>\n\
+  <li>Internal field names unified: <code>buffer</code>/<code>out_buffer</code> \u2192\
+  \ <code>out_array</code> across all phase-computing structs; <code>base</code> \u2192\
+  \ <code>phs_buf</code> in <code>HardingInterpolator</code>.</li>\n<li><code>ImagingSpec</code>\
+  \ stores <code>grid_step</code> directly; removed <code>ap_step</code> helper \u2014\
+  \ use <code>img_spec.grid_step</code>.</li>\n<li><code>ChunkSplitters.jl</code>\
+  \ added as a direct dependency for better load balancing</li>\n</ul>\n<p><strong>Full\
+  \ Changelog</strong>: https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl/compare/v0.4.1...v0.5.0</p>"
+authors:
+- family-names: Alexander Yavorsky
+cff-version: 1.2.0
+date-released: '2026-06-13'
+doi: 10.5281/zenodo.20734890
+identifiers:
+- type: swh
+  value: swh:1:dir:3f97f2cfd842a7cc090e4592a8147ed56b5f14a2;origin=https://doi.org/10.5281/zenodo.20734890;visit=swh:1:snp:dc338f5d0f8106dc9b55e24d0ff0f8c953a364d8;anchor=swh:1:rel:974f56e02a9a20b2a9c18d624a21b1712a3a9d30;path=aryavorskiy-AtmosphericTurbulenceSimulator.jl-91e8259
+license:
+- mpl-2.0
+message: If you use this software, please cite it using the metadata from this file.
+repository-code: https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl
+title: 'aryavorskiy/AtmosphericTurbulenceSimulator.jl: v0.5.0'
+type: software
+version: v0.5.0
