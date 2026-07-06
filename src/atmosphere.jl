@@ -1,7 +1,18 @@
 using LinearAlgebra, HDF5, Random, Adapt, ChunkSplitters
 
-const DEFAULT_WAVELEN = 550.0
+const DEFAULT_WAVELEN = 550.0nm
 abstract type AtmosphereSpec{T} end
+
+# Coerce a wavelength to a length quantity. Plain numbers are assumed to be
+# nanometers for backward compatibility, with a one-time deprecation warning.
+_as_wavelength(x::Unitful.Length) = x
+_as_wavelength(x::Unitful.Quantity) =
+    throw(ArgumentError("Wavelengths must be length quantities, got $(typeof(x))."))
+function _as_wavelength(x::Number)
+    @warn "Passing plain numbers as wavelengths is deprecated; assuming nanometers. \
+        Attach units explicitly, e.g. `$(x)nm`." maxlog=1
+    return x * nm
+end
 
 """
     kolmogorov_covmat(W)
@@ -116,20 +127,20 @@ An `AtmosphereSpec` that produces independent (uncorrelated) phase frames for ea
 The Harding interpolation follows "Fast simulation of a Kolmogorov phase screen"
 Cressida M. Harding, Rachel A. Johnston, and Richard G. Lane, APPLIED OPTICS Vol. 38, No. 11, April 1999
 """
-struct SingleLayer{T<:Real,T2<:Real,T3<:Real,KT} <: AtmosphereSpec{T}
+struct SingleLayer{T<:Number,T2<:Number,T3<:Number,KT} <: AtmosphereSpec{T}
     r₀::T
     base_wavelength::T2
     wind_velocity::NTuple{2,T3}
     harding_kw::KT
 end
-function SingleLayer(r0::Real; base_wavelength=DEFAULT_WAVELEN, wind_velocity=(0, 0), kw...)
-    SingleLayer(float(r0), base_wavelength, wind_velocity, kw)
+function SingleLayer(r0::Number; base_wavelength=DEFAULT_WAVELEN, wind_velocity=(0, 0), kw...)
+    SingleLayer(float(r0), _as_wavelength(base_wavelength), wind_velocity, kw)
 end
-SingleLayer(::Type{T}, r0::Real; kw...) where T = SingleLayer(convert(T, r0); kw...)
+SingleLayer(::Type{T}, r0::Number; kw...) where T = SingleLayer(convert(T, ustrip(r0)) * unit(r0); kw...)
 function prepare_phasebuffers(spec::SingleLayer, plate_size::NTuple{2,Int}, plate_step::Number, batch::Int, deviceadapter)
     harding = HardingSpec(plate_size; spec.harding_kw...)
     low_size = harding.size_from
-    low_r₀_px = Number(spec.r₀ / oftype(spec.r₀, plate_step)) / 2^harding.nsteps
+    low_r₀_px = oftype(ustrip(spec.r₀), NoUnits(spec.r₀ / plate_step) / 2^harding.nsteps)
     covar = Adapt.adapt_storage(deviceadapter, kolmogorov_covmat(typeof(low_r₀_px), low_size))
     covar .*= low_r₀_px^(-5/3)
     E, U = eigen(Symmetric(covar))
@@ -308,14 +319,15 @@ struct SavedPhases{T<:Real,D,WT,WL,GT} <: AtmosphereSpec{T}
     grid_step::GT
 end
 function SavedPhases(dataset, d::Union{Number,Nothing}=nothing;
-        wind_velocity::NTuple{2,<:Real}=(0, 0), base_wavelength=DEFAULT_WAVELEN,
+        wind_velocity::NTuple{2,<:Number}=(0, 0), base_wavelength=DEFAULT_WAVELEN,
         grid_step=nothing)
     T = eltype(dataset)
     WT = typeof(wind_velocity[1])
+    base_wl = _as_wavelength(base_wavelength)
     grid_step_final = grid_step !== nothing ? grid_step :
         d !== nothing ? d / maximum(size(dataset)[1:2]) : nothing
-    return SavedPhases{T,typeof(dataset),WT,typeof(base_wavelength),typeof(grid_step_final)}(
-        dataset, wind_velocity, base_wavelength, grid_step_final)
+    return SavedPhases{T,typeof(dataset),WT,typeof(base_wl),typeof(grid_step_final)}(
+        dataset, wind_velocity, base_wl, grid_step_final)
 end
 
 mutable struct SavedPhaseBuffers{BDT, BT, CT}

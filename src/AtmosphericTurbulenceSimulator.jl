@@ -1,5 +1,12 @@
 module AtmosphericTurbulenceSimulator
 
+using Unitful
+export @u_str
+import Unitful: m, cm, mm, μm, nm
+export m, cm, mm, μm, nm
+import Unitful: s, ms, μs, ns
+export s, ms, μs, ns
+
 include("io.jl")
 export HDF5File
 include("atmosphere.jl")

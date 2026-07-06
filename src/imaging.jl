@@ -9,23 +9,28 @@ Representation of a spectral filter used by the imaging pipeline.
     FilterSpec(wavelengths[, intensities])
 
 # Arguments
-- `wavelengths`: vector of sampled wavelengths within the filter bandpass.
+- `wavelengths`: vector of sampled wavelengths within the filter bandpass. Should be a Unitful
+  length; plain numbers are assumed to be nanometers (deprecated).
 - `intensities`: vector of relative intensities at each sampled wavelength. If not provided,
   equal weights are assumed.
 """
 struct FilterSpec{T1,T2}
     wavelengths::Vector{T1}
     intensities::Vector{T2}
+    FilterSpec{T1,T2}(wavelengths, intensities) where {T1,T2} = new{T1,T2}(wavelengths, intensities)
 end
-FilterSpec(wavelengths::AbstractVector{T1}, intensities::AbstractVector{T2}=ones(Int, length(wavelengths))) where {T1,T2} =
-    FilterSpec{T1,T2}(wavelengths, intensities)
+function FilterSpec(wavelengths::AbstractVector, intensities::AbstractVector=ones(Int, length(wavelengths)))
+    wl = _as_wavelength.(wavelengths)
+    return FilterSpec{eltype(wl),eltype(intensities)}(wl, intensities)
+end
 nwavel(fs::FilterSpec) = length(fs.wavelengths)
 
 """
     FilterSpec(base_wavelength; [bandwidth=0, tcenter=1, tedge=1, npts=7])
 
 # Arguments
-- `base_wavelength`: central wavelength for the filter (same units as `wavelengths`).
+- `base_wavelength`: central wavelength for the filter. Should be a Unitful length; a plain
+  number is assumed to be nanometers (deprecated).
 
 # Keyword Arguments
 - `bandwidth`: total width of the filter bandpass in wavelength units. If zero, the filter is monochromatic.
@@ -33,9 +38,11 @@ nwavel(fs::FilterSpec) = length(fs.wavelengths)
 - `tedge`: relative intensity at the edges of the bandpass (default 1).
 - `npts`: number of sample points across the bandpass (default 7).
 """
-function FilterSpec(base_wavelength::Real=DEFAULT_WAVELEN; bandwidth=0, tcenter=1, tedge=1, npts=7)
-    iszero(bandwidth) && return FilterSpec([base_wavelength], [tcenter])
-    wavelengths = range(base_wavelength - bandwidth / 2, base_wavelength + bandwidth / 2, length=npts)
+function FilterSpec(base_wavelength::Number=DEFAULT_WAVELEN; bandwidth=0, tcenter=1, tedge=1, npts=7)
+    base = _as_wavelength(base_wavelength)
+    bw = _as_wavelength(bandwidth)
+    iszero(bw) && return FilterSpec([base], [tcenter])
+    wavelengths = range(base - bw / 2, base + bw / 2, length=npts)
     intensities = range(-pi/2, pi/2, length=npts) .|> x -> cos(x) * (tcenter - tedge) + tedge
     return FilterSpec(wavelengths, intensities)
 end
@@ -105,8 +112,8 @@ Base.convert(::Type{PhotonCount{T}}, pc::PhotonCount) where T<:Real =
     PhotonCount{T}(pc.nphotons, pc.background)
 isfinite_photons(pc::PhotonCount) = isfinite(pc.nphotons)
 
-struct Exposure
-    exptime::Float64
+struct Exposure{ET<:Number}
+    exptime::ET
     nsteps::Int
     round_offsets::Bool
 end
@@ -355,15 +362,18 @@ CircularAperture(sz::NTuple{2}, radius=minimum((sz .- 1) .÷ 2); kw...) =
     CircularAperture(Float64, sz, radius; kw...)
 
 function padded_plate_size(atm_spec::AtmosphereSpec, img_spec::ImagingSpec)
+    if iszero(img_spec.exposure.exptime) || all(iszero, atm_spec.wind_velocity)
+        return plate_size(img_spec)
+    end
     max_offset = atm_spec.wind_velocity .* img_spec.exposure.exptime ./ img_spec.grid_step
-    return plate_size(img_spec) .+ ceil.(Int, abs.(max_offset))
+    return plate_size(img_spec) .+ ceil.(Int, abs.(NoUnits.(max_offset)))
 end
 function long_exp_offsets(atm_spec::AtmosphereSpec, img_spec::ImagingSpec)
     n = img_spec.exposure.nsteps
     if n == 1 || iszero(img_spec.exposure.exptime) || all(iszero, atm_spec.wind_velocity)
-        offset_list = [atm_spec.wind_velocity .* img_spec.exposure.exptime .* 0]
+        offset_list = [ustrip.(atm_spec.wind_velocity .* img_spec.exposure.exptime .* 0)]
     else
-        offset_list = [atm_spec.wind_velocity .* (img_spec.exposure.exptime * j / (n - 1) / img_spec.grid_step) for j in 0:n-1]
+        offset_list = [NoUnits.(atm_spec.wind_velocity .* (img_spec.exposure.exptime * j / (n - 1) / img_spec.grid_step)) for j in 0:n-1]
     end
     if img_spec.exposure.round_offsets
         offset_list = [round.(offset) for offset in offset_list]
@@ -387,7 +397,7 @@ function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int,
     nbufs = min(adapter.nworkers, batch)
     chunk_ranges = collect(chunks(1:batch; n=nbufs))
     img_spec_adapt = adapt(adapter, img_spec)
-    phs_factors = img_spec.filter_spec.wavelengths ./ atm_spec.base_wavelength
+    phs_factors = NoUnits.(img_spec.filter_spec.wavelengths ./ atm_spec.base_wavelength)
     opt_buffer1 = OpticalBuffers(T, img_spec_adapt, phs_factors, length(chunk_ranges[1]))
     img_array = similar(opt_buffer1.read_buffer, image_size(img_spec)..., batch)
     opt_bufs = Array{typeof(opt_buffer1)}(undef, nbufs)
