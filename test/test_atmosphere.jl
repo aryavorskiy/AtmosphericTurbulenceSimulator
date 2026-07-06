@@ -58,7 +58,7 @@
             @test phases2[:, :, 1:3] == data[1:4, 1:5, 1:3]
 
             atm2 = SavedPhases(fid["phases"], 7; base_wavelength=500.0)
-            @test atm2.base_wavelength == 500.0
+            @test atm2.base_wavelength == 500.0u"nm"
             @test_throws ArgumentError simulate_phases(atm2, (6, 7), 8; n=1, verbose=false)
         end
         rm(tmpfile, force=true)
@@ -66,19 +66,19 @@
 
     @testset "Phase statistics" begin
         # Generate phase screens and check basic statistics
-        atm1 = SingleLayer(Float32, 5, interpolate=2)
-        atm2 = SingleLayer(Float32, 5, interpolate_from=(15, 15))
+        atm1 = SingleLayer(Float32, 20cm, interpolate=2)
+        atm2 = SingleLayer(Float32, 20cm, interpolate_from=(15, 15))
 
         Random.seed!(123)
         for atm in (atm1, atm2)
-            phases = simulate_phases(atm, (64, 64), 64; n=1000, verbose=false)
+            phases = simulate_phases(atm, (64, 64), 2m; n=1000, verbose=false)
             @test eltype(phases) == Float32
 
             for D in [(3, 2), (3, 15), (5, 5), (5, 20), (16, 2), (16, 16)]
                 diff = @views phases[D[1]+1:end, D[2]+1:end, :] .- phases[1:end-D[1], 1:end-D[2], :]
                 emp_structure = mean(abs2, diff)
                 struc_amp_var = mean(x -> (abs2(x) - emp_structure)^2, diff)
-                @test emp_structure ≈ 6.88 * (hypot(D...) / 5)^(5/3) atol=3 * struc_amp_var
+                @test emp_structure ≈ 6.88 * (hypot(D...) / (0.2 / 2 * 64))^(5/3) atol=3 * struc_amp_var
             end
         end
         Random.seed!()

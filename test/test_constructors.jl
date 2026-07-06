@@ -1,10 +1,21 @@
 import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers, isfinite_photons
+using Unitful
 
 @testset "Constructors" begin
     @testset "SingleLayer" begin
         atm = SingleLayer(5.0)
         @test atm isa SingleLayer
         @test atm.r₀ == 5.0
+        @test atm.base_wavelength == 550nm
+
+        atm = SingleLayer(0.5m; base_wavelength=500nm, wind_velocity=(1m/s, 1m/s))
+        @test atm.r₀ == 0.5m
+        @test atm.base_wavelength == 500nm
+        @test atm.wind_velocity == (1m/s, 1m/s)
+
+        atm32 = SingleLayer(Float32, 0.5m)
+        @test atm32.r₀ isa Quantity{Float32}
+        @test unit(atm32.r₀) == m
 
         # Test Harding interpolation
         hspec = HardingSpec((64, 64); interpolate=:auto)
@@ -39,8 +50,16 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers, isfinite_ph
 
     @testset "FilterSpec" begin
         filter = FilterSpec(500; bandwidth=100, npts=5)
-        @test filter.wavelengths == range(450, 550, length=5)
+        @test filter.wavelengths == range(450, 550, length=5) * nm
         @test filter.intensities == ones(5)
+
+        filter2 = FilterSpec(0.5μm; bandwidth=0.1μm, npts=5)
+        @test filter2.wavelengths ≈ range(450, 550, length=5) * nm
+        @test filter2.intensities == ones(5)
+
+        filter_mono = FilterSpec(600, tcenter=0.8)
+        @test filter_mono.wavelengths == [600nm]
+        @test filter_mono.intensities == [0.8]
 
         # Non-flat intensities (tcenter ≠ tedge)
         filter_shaped = FilterSpec(550.0; bandwidth=100.0, tcenter=1.0, tedge=0.5, npts=7)
@@ -52,7 +71,7 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers, isfinite_ph
         wl = [480.0, 550.0, 620.0]
         intens = [0.8, 1.0, 0.8]
         filter_vec = FilterSpec(wl, intens)
-        @test filter_vec.wavelengths == wl
+        @test filter_vec.wavelengths == wl * nm
         @test filter_vec.intensities == intens
     end
 
@@ -79,14 +98,17 @@ import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers, isfinite_ph
         img_spec = ImagingSpec(ap, 32, PhotonCount(Inf))
         @test size(img_spec.aperture) == (32, 32)
         @test img_spec.img_size == (64, 64)
+        @test img_spec.grid_step == 1
 
         img_spec_custom = ImagingSpec(ap, 32, PhotonCount(Inf); nyquist_oversample=1.5)
         @test img_spec_custom.img_size == (96, 96)
 
+        img_spec = ImagingSpec(ap, 1m, PhotonCount(Inf))
+        @test img_spec.grid_step == 1m / size(ap, 1)
+
         # Test with filter
-        filter = FilterSpec(500.0; bandwidth=100.0)
         img_spec_filter = ImagingSpec(ap, 32, PhotonCount(1e6, 10); filter=FilterSpec(500.0; bandwidth=100.0))
-        @test img_spec_filter.filter_spec.wavelengths[end÷2+1] == 500.0
+        @test img_spec_filter.filter_spec.wavelengths[end÷2+1] == 500nm
         @test img_spec_filter.photon_count.nphotons == 1e6
         @test img_spec_filter.photon_count.background == 10
 

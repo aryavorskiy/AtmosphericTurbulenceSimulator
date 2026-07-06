@@ -113,12 +113,15 @@ using Random
         res1 = simulate_images(atm1, img_spec1, n=10, verbose=false)
 
         # 2 m aperture, 0.5 m r_0, sqrt(2)/8 m/s wind velocity, 3 s exposure
-        img_spec2 = ImagingSpec(ap, 2, PhotonCount(Inf), exposure=3)
-        atm2 = SingleLayer(0.5, wind_velocity=(0.125, 0.125), interpolate=:auto)
+        img_spec2 = ImagingSpec(ap, 2m, PhotonCount(Inf), exposure=3s)
+        atm2 = SingleLayer(50cm, wind_velocity=(0.125m/s, 0.125m/s), interpolate=:auto)
         Random.seed!(123)
         res2 = simulate_images(atm2, img_spec2, n=10, verbose=false)
 
         @test res1.phases ≈ res2.phases
         @test res1.images ≈ res2.images
+
+        img_spec_bad = ImagingSpec(ap, 2.0u"m", PhotonCount(Inf); exposure=Exposure(3.0u"m", 5))
+        @test_throws Unitful.DimensionError simulate_images(atm1, img_spec_bad; n=4, file=nothing, verbose=false)
     end
 end
