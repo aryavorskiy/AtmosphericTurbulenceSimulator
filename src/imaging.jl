@@ -17,24 +17,24 @@ struct FilterSpec{T1,T2}
     wavelengths::Vector{T1}
     intensities::Vector{T2}
 end
-FilterSpec(wavelengths::AbstractVector{T1}, intensities::AbstractVector{T2}=ones(length(wavelengths))) where {T1,T2} =
+FilterSpec(wavelengths::AbstractVector{T1}, intensities::AbstractVector{T2}=ones(Int, length(wavelengths))) where {T1,T2} =
     FilterSpec{T1,T2}(wavelengths, intensities)
-MonoFilterSpec(::Type{T}=Int) where T = FilterSpec([DEFAULT_WAVELEN], [1])
 nwavel(fs::FilterSpec) = length(fs.wavelengths)
 
 """
-    FilterSpec(base_wavelength; bandwidth[, tcenter=1, tedge=1, npts=7])
+    FilterSpec(base_wavelength; [bandwidth=0, tcenter=1, tedge=1, npts=7])
 
 # Arguments
 - `base_wavelength`: central wavelength for the filter (same units as `wavelengths`).
 
 # Keyword Arguments
-- `bandwidth`: total width of the filter bandpass in wavelength units.
+- `bandwidth`: total width of the filter bandpass in wavelength units. If zero, the filter is monochromatic.
 - `tcenter`: relative intensity at the center wavelength (default 1).
 - `tedge`: relative intensity at the edges of the bandpass (default 1).
 - `npts`: number of sample points across the bandpass (default 7).
 """
-function FilterSpec(base_wavelength::Real=DEFAULT_WAVELEN; bandwidth, tcenter=1, tedge=1, npts=7)
+function FilterSpec(base_wavelength::Real=DEFAULT_WAVELEN; bandwidth=0, tcenter=1, tedge=1, npts=7)
+    iszero(bandwidth) && return FilterSpec([base_wavelength], [tcenter])
     wavelengths = range(base_wavelength - bandwidth / 2, base_wavelength + bandwidth / 2, length=npts)
     intensities = range(-pi/2, pi/2, length=npts) .|> x -> cos(x) * (tcenter - tedge) + tedge
     return FilterSpec(wavelengths, intensities)
@@ -226,7 +226,7 @@ Create an imaging system specification.
   and `nyquist_oversample`.
 """
 function ImagingSpec(aperture::AbstractMatrix{T}, d::Number, photon_count::PhotonCount;
-    filter::FilterSpec=MonoFilterSpec(),
+    filter::FilterSpec=FilterSpec(DEFAULT_WAVELEN),
     nyquist_oversample::Real=1, exposure::Union{Exposure,Number}=0,
     img_size::NTuple{2,Int}=round.(Int, size(aperture) .* 2 .* nyquist_oversample)) where T<:Real
     pc = convert(PhotonCount{T}, photon_count)
