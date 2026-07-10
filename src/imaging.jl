@@ -40,9 +40,9 @@ nwavel(fs::FilterSpec) = length(fs.wavelengths)
 """
 function FilterSpec(base_wavelength::Number=DEFAULT_WAVELEN; bandwidth=0, tcenter=1, tedge=1, npts=7)
     base = _as_wavelength(base_wavelength)
-    bw = _as_wavelength(bandwidth)
-    iszero(bw) && return FilterSpec([base], [tcenter])
-    wavelengths = range(base - bw / 2, base + bw / 2, length=npts)
+    iszero(bandwidth) && return FilterSpec([base], [tcenter])
+    bw_units = _as_wavelength(bandwidth)
+    wavelengths = range(base - bw_units / 2, base + bw_units / 2, length=npts)
     intensities = range(-pi/2, pi/2, length=npts) .|> x -> cos(x) * (tcenter - tedge) + tedge
     return FilterSpec(wavelengths, intensities)
 end
@@ -218,13 +218,13 @@ Create an imaging system specification.
 # Arguments
 - `T`: desired number type, inferred from `aperture` if not provided.
 - `aperture`: 2D aperture (pupil) array describing the telescope pupil.
-- `d`: aperture diameter in the same units as ``r_0``. Used to compute `grid_step` as
+- `d`: aperture diameter in the same units as ``r_0`` (e.g. `2m`). Used to compute `grid_step` as
   `d / maximum(size(aperture))`.
 - `photon_count`: `PhotonCount` instance describing the photon budget and background.
 
 # Keyword Arguments
 - `filter`: `FilterSpec` describing sampled wavelengths and their relative intensities.
-  Defaults to a monochromatic filter.
+  Defaults to a monochromatic filter at 550 nm.
 - `exposure`: a number or an [`Exposure`](@ref) instance describing the exposure time and number of
   steps for long exposures. Defaults to zero exposure time (i.e. short exposure).
 - `nyquist_oversample`: multiplicative factor applied to the default Nyquist image size (`2 * size(aperture)`).

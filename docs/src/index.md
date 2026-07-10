@@ -10,6 +10,7 @@ Features include:
 - Photon-counting readout with optional background.
 - Non-monochromatic filters with wavelength-dependent turbulence and diffraction.
 - Long-exposure simulations with wind-driven phase screen evolution.
+- [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) support: physical quantities can be specified in fitting units (e.g. `0.2m`, `550nm`, `0.5s`).
 - HDF5 output for large batches, or in-memory arrays for interactive work.
 - CPU multi-threading and CUDA support.
 
@@ -57,6 +58,28 @@ fig
 For larger simulations, specify the `file` keyword argument to write results directly to disk. 
 See the [Examples](@ref) section for more info.
 
+## Physical Units
+
+The package integrates with [Unitful.jl](https://github.com/PainterQubits/Unitful.jl). Common
+length and time units (`m`, `cm`, `mm`, `μm`, `nm`, `s`, `ms`, `μs`, `ns`) and the `@u_str`
+string macro are re-exported, so you can attach units directly:
+
+```julia
+atm = SingleLayer(0.2m; base_wavelength=550nm, wind_velocity=(4m/s, 4m/s))
+img_spec = ImagingSpec(CircularAperture((64, 64)), 2m, PhotonCount(1e7, 200);
+    filter=FilterSpec(550nm; bandwidth=40nm), exposure=Exposure(0.5s, 10))
+```
+
+Units are only bookkeeping over the same dimensionless ratios the simulation already used
+(``r_0 / \text{grid\_step}``, ``\lambda / \lambda_\text{base}``, ``v\,t / \text{grid\_step}``),
+so a fully unit-annotated run yields the exact same numbers as the equivalent plain-number run.
+Values that share a physical dimension may be given in **different** units — e.g. ``r_0`` in `cm`
+against an aperture in `m`; they are converted automatically. Inconsistent dimensions (say a length
+``r_0`` against a time `grid_step`) raise an error.
+
+Plain numbers still work everywhere. Wavelengths given as plain numbers are assumed to be
+nanometers with a one-time deprecation warning; attach `nm` explicitly to silence it.
+
 ## Atmosphere Model
 
 The current atmosphere model is a single turbulent layer. Phase covariance follows Kolmogorov
@@ -68,23 +91,25 @@ D_\phi(r) = \big\langle (\phi(x) - \phi(x+r))^2 \big\rangle
 ```
 
 The Fried parameter ``r_0`` controls turbulence strength. Larger ``r_0`` means weaker phase
-aberrations. Pass ``r_0`` in the same physical units as the aperture diameter `d` (see below).
-In several cases you can also set the grid step directly, which is the physical size of one pixel
-of the wavefront and also musi use the same units as ``r_0``.
+aberrations. Pass ``r_0`` in the same physical units as the aperture diameter `d` (see below);
+these may be Unitful lengths (e.g. `0.2m`) or plain numbers. In several cases you can also set the
+grid step directly, which is the physical size of one pixel of the wavefront and also uses the same
+units as ``r_0``.
 
 For large grids, [`SingleLayer`](@ref) can use Harding interpolation ([Harding et al. 1999](https://doi.org/10.1364/AO.38.002161)). 
 The phase is sampled on a smaller grid and then upsampled in a way that preserves Kolmogorov statistics. `interpolate=:auto`
 selects a coarse grid size based on the default heuristic.
 
 You can also replay phase screens from a dataset or an array using the [`SavedPhases`](@ref)
-atmosphere specification. Each atmosphere spec also accepts a `base_wavelength` keyword (in nm,
-default 550 nm) that sets the reference wavelength for broadband simulations.
+atmosphere specification. Each atmosphere spec also accepts a `base_wavelength` keyword (default
+550 nm; a Unitful length or a plain number assumed to be nm) that sets the reference wavelength for
+broadband simulations.
 
 ## Imaging Model
 
 The parameters of the imaging system are defined by an [`ImagingSpec`](@ref) object, which includes the following fields:
 - The aperture function, which can be a predefined shape like [`CircularAperture`](@ref) or a user-defined array.
-- The aperture diameter `d`, in the same units as ``r_0`` in the atmosphere model.
+- The aperture diameter `d`, in the same units as ``r_0`` in the atmosphere model (Unitful length or plain number).
 - The photon budget, defined by a [`PhotonCount`](@ref) object that specifies the total number of photons and background level.
 - The filter specification, defined by a [`FilterSpec`](@ref) that sets the wavelengths and relative intensities for non-monochromatic simulations.
 - The exposure time, which can be used to simulate long exposures by averaging multiple phase screens together. See [`Exposure`](@ref).
@@ -96,8 +121,9 @@ to the `base_wavelength` of the atmosphere spec (default 550 nm). The aperture i
 achromatic.
 
 Long exposures are simulated by averaging multiple short-exposure frames with wind-shifted phase
-screens. Wind velocity is interpreted in the same physical units as `d` and ``r_0`` per unit time.
-See [this example](@ref "Variable exposure times") for details.
+screens. Wind velocity is interpreted in the same length units as `d` and ``r_0`` per unit time,
+and the exposure time in the matching time units (e.g. `wind_velocity=(4m/s, 4m/s)` with
+`Exposure(0.5s, 10)`). See [this example](@ref "Variable exposure times") for details.
 
 !!! note
     The sampled-bandpass model is most appropriate for narrow bands where the telescope pupil does

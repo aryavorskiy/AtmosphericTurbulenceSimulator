@@ -100,20 +100,22 @@ function HardingSpec(final_size::NTuple{2,Int}; interpolate=0, interpolate_from=
 end
 
 """
-    SingleLayer([T, ]size, r0[; base_wavelength, wind_velocity, interpolate, interpolate_from, size_heuristics=1024])
+    SingleLayer([T, ]r0[; base_wavelength, wind_velocity, interpolate, interpolate_from, size_heuristics=1024])
 
 An `AtmosphereSpec` that produces independent (uncorrelated) phase frames for each timestep.
 
 # Arguments
 - `T`: the number type for phase screens (default `Float64`).
-- `size`: a tuple `(nx, ny)` specifying the phase screen shape in pixels (coarse sampler grid).
-- `r0`: Fried parameter (r₀) in pixels.
+- `r0`: Fried parameter (``r_0``) in length units (e.g. `0.2m`). A plain number is interpreted
+    in whatever units `d`/`grid_step` uses.
 
 # Keyword Arguments
-- `base_wavelength`: reference wavelength in nm used to scale phase screens when a multi-wavelength
-  `FilterSpec` is used (default 550 nm).
+- `base_wavelength`: reference wavelength used to scale phase screens when a multi-wavelength
+  `FilterSpec` is used in length units (default 550 nm). A plain number is assumed to be
+  nanometers (deprecated).
 - `wind_velocity`: two-component `(vx, vy)` wind velocity used for long-exposure offsets in
-  imaging simulations (default `(0, 0)`).
+  imaging simulations in velocity units (default `(0, 0)`). A plain number is assumed to be
+  in whatever units `d`/`grid_step` and `exposure` use.
 - `interpolate`: when specified, the phase screen is sampled at a lower resolution and
     then upsampled using specified number of Harding interpolation passes. If set to `:auto`,
     the number of passes is chosen such that the low-res grid has at most `size_heuristics` total pixels.

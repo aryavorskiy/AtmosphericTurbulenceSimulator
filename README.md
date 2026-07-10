@@ -18,39 +18,18 @@ Pkg.add(url="https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl")
 
 ## Quick example
 
-### Turbulent phase generation
-
-The core functionality is generating turbulent phase screens using the `SingleLayer` atmosphere specification.
-You can generate phase screens with or without Harding interpolation:
+To simulate speckle patterns formed by turbulence, define an atmosphere specification, an imager
+specification and a true-sky model:
 
 ```julia
 using AtmosphericTurbulenceSimulator
 
-# With Harding interpolation: samples at low resolution, then upsamples
-# Using :auto to determine optimal number of interpolation passes
-# Fried parameter r0 = 0.2 m
-atm = SingleLayer(0.2; interpolate=:auto)
-
-# Generate phase screens and save to HDF5 (64-pixel grid with 2 m size)
-simulate_phases(atm, (64, 64), 2; n=3000, file="phases.h5")
-```
-
-The Harding interpolation (from [Harding et al. 1999](https://doi.org/10.1364/AO.38.002161))
-allows efficient generation of high-resolution phase screens by sampling the turbulence at a coarser
-resolution and upsampling in a way that preserves Kolmogorov statistics.
-
-### PSF simulation with imaging pipeline
-
-To simulate actual images through turbulence, combine the atmosphere specification with an imaging
-specification and a true-sky model:
-
-```julia
 # Define circular aperture and imaging parameters
 ap = CircularAperture((64, 64))
-img_spec = ImagingSpec(ap, 2, PhotonCount(1e6, 100))
+img_spec = ImagingSpec(ap, 2m, PhotonCount(1e6, 100))
 
 # Atmosphere specification
-atm = SingleLayer(0.2, interpolate=:auto)
+atm = SingleLayer(0.2m, interpolate=:auto)
 
 # True sky models:
 # Point source

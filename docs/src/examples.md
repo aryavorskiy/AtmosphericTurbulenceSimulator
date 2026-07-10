@@ -138,14 +138,14 @@ using AtmosphericTurbulenceSimulator
 using CairoMakie, Statistics
 
 aperture = CircularAperture((64, 64), 30)
-atm = SingleLayer(0.2; interpolate=:auto)
+atm = SingleLayer(0.2m; interpolate=:auto)
 
 # Two narrow-band filters centred at 550 nm and 820 nm
-filter_vis = FilterSpec(550; bandwidth=40)
-filter_nir = FilterSpec(820; bandwidth=40)
+filter_vis = FilterSpec(550nm; bandwidth=40nm)
+filter_nir = FilterSpec(820nm; bandwidth=40nm)
 
-img_spec_vis = ImagingSpec(aperture, 2, PhotonCount(1e7, 200); filter=filter_vis)
-img_spec_nir = ImagingSpec(aperture, 2, PhotonCount(1e7, 200); filter=filter_nir)
+img_spec_vis = ImagingSpec(aperture, 2m, PhotonCount(1e7, 200); filter=filter_vis)
+img_spec_nir = ImagingSpec(aperture, 2m, PhotonCount(1e7, 200); filter=filter_nir)
 
 phases, imgs_vis = simulate_images(atm, img_spec_vis; n=128)
 imgs_nir = simulate_images(SavedPhases(phases), img_spec_nir; n=128).images
@@ -184,8 +184,8 @@ padding so that the wind shift fits inside it:
 ```@example variable_exposure
 using AtmosphericTurbulenceSimulator, CairoMakie
 # r0 = 0.2 m, aperture d = 2 m represented on 64 pixels → r0 in same units as d
-atm = SingleLayer(0.2, interpolate=:auto)
-phases = simulate_phases(atm, (128, 128); n=1, grid_step=2/64)
+atm = SingleLayer(0.2m, interpolate=:auto)
+phases = simulate_phases(atm, (128, 128); n=1, grid_step=2m/64)
 nothing # hide
 ```
 
@@ -194,14 +194,14 @@ The screen is automatically cropped to the 64-pixel aperture grid and shifted by
 ``v \times t_\text{exp}`` in physical units, converted to pixels via `d`:
 
 ```@example variable_exposure
-atm_saved = SavedPhases(phases; wind_velocity=(4, 4))   # 5.5 m/s on a 64-px/2-m grid
+atm_saved = SavedPhases(phases; wind_velocity=(4m/s, 4m/s))   # 5.5 m/s on a 64-px/2-m grid
 ap = CircularAperture((64, 64), 31)
-img_spec_base = ImagingSpec(ap, 2, PhotonCount(Inf))
+img_spec_base = ImagingSpec(ap, 2m, PhotonCount(Inf))
 img_shrt = simulate_images(atm_saved, img_spec_base; n=1).images[:, :, 1]
 img_medi = simulate_images(atm_saved,                      # vt = 5.5 m/s × 0.05 s = 0.275 m shift
-    ImagingSpec(ap, 2, PhotonCount(Inf); exposure=Exposure(0.05, 10)); n=1).images[:, :, 1]
+    ImagingSpec(ap, 2m, PhotonCount(Inf); exposure=Exposure(0.05s, 10)); n=1).images[:, :, 1]
 img_long = simulate_images(atm_saved,                      # vt = 5.5 m/s × 0.5 s = 2.75 m shift
-    ImagingSpec(ap, 2, PhotonCount(Inf); exposure=Exposure(0.5, 10)); n=1).images[:, :, 1]
+    ImagingSpec(ap, 2m, PhotonCount(Inf); exposure=Exposure(0.5s, 10)); n=1).images[:, :, 1]
 
 heatmap_kws(title) = (;colormap=:jet, colorrange=(0, maximum(img_shrt)), 
     axis=(;aspect=DataAspect(), title=title, xticks=Int[], yticks=Int[]))
