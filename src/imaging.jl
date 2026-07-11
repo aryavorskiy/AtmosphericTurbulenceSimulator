@@ -10,7 +10,7 @@ Representation of a spectral filter used by the imaging pipeline.
 
 # Arguments
 - `wavelengths`: vector of sampled wavelengths within the filter bandpass. Should be a Unitful
-  length; plain numbers are assumed to be nanometers (deprecated).
+  length; plain numbers are assumed to be nanometers.
 - `intensities`: vector of relative intensities at each sampled wavelength. If not provided,
   equal weights are assumed.
 """
@@ -30,7 +30,7 @@ nwavel(fs::FilterSpec) = length(fs.wavelengths)
 
 # Arguments
 - `base_wavelength`: central wavelength for the filter. Should be a Unitful length; a plain
-  number is assumed to be nanometers (deprecated).
+  number is assumed to be nanometers.
 
 # Keyword Arguments
 - `bandwidth`: total width of the filter bandpass in wavelength units. If zero, the filter is monochromatic.

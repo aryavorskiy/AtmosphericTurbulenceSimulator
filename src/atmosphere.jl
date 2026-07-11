@@ -3,16 +3,10 @@ using LinearAlgebra, HDF5, Random, Adapt, ChunkSplitters
 const DEFAULT_WAVELEN = 550.0nm
 abstract type AtmosphereSpec{T} end
 
-# Coerce a wavelength to a length quantity. Plain numbers are assumed to be
-# nanometers for backward compatibility, with a one-time deprecation warning.
 _as_wavelength(x::Unitful.Length) = x
 _as_wavelength(x::Unitful.Quantity) =
     throw(ArgumentError("Wavelengths must be length quantities, got $(typeof(x))."))
-function _as_wavelength(x::Number)
-    @warn "Passing plain numbers as wavelengths is deprecated; assuming nanometers. \
-        Attach units explicitly, e.g. `$(x)nm`." maxlog=1
-    return x * nm
-end
+_as_wavelength(x::Number) = x * nm
 
 """
     kolmogorov_covmat(W)
@@ -112,7 +106,7 @@ An `AtmosphereSpec` that produces independent (uncorrelated) phase frames for ea
 # Keyword Arguments
 - `base_wavelength`: reference wavelength used to scale phase screens when a multi-wavelength
   `FilterSpec` is used in length units (default 550 nm). A plain number is assumed to be
-  nanometers (deprecated).
+  nanometers.
 - `wind_velocity`: two-component `(vx, vy)` wind velocity used for long-exposure offsets in
   imaging simulations in velocity units (default `(0, 0)`). A plain number is assumed to be
   in whatever units `d`/`grid_step` and `exposure` use.

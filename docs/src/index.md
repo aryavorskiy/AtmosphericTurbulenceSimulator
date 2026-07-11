@@ -58,28 +58,6 @@ fig
 For larger simulations, specify the `file` keyword argument to write results directly to disk. 
 See the [Examples](@ref) section for more info.
 
-## Physical Units
-
-The package integrates with [Unitful.jl](https://github.com/PainterQubits/Unitful.jl). Common
-length and time units (`m`, `cm`, `mm`, `μm`, `nm`, `s`, `ms`, `μs`, `ns`) and the `@u_str`
-string macro are re-exported, so you can attach units directly:
-
-```julia
-atm = SingleLayer(0.2m; base_wavelength=550nm, wind_velocity=(4m/s, 4m/s))
-img_spec = ImagingSpec(CircularAperture((64, 64)), 2m, PhotonCount(1e7, 200);
-    filter=FilterSpec(550nm; bandwidth=40nm), exposure=Exposure(0.5s, 10))
-```
-
-Units are only bookkeeping over the same dimensionless ratios the simulation already used
-(``r_0 / \text{grid\_step}``, ``\lambda / \lambda_\text{base}``, ``v\,t / \text{grid\_step}``),
-so a fully unit-annotated run yields the exact same numbers as the equivalent plain-number run.
-Values that share a physical dimension may be given in **different** units — e.g. ``r_0`` in `cm`
-against an aperture in `m`; they are converted automatically. Inconsistent dimensions (say a length
-``r_0`` against a time `grid_step`) raise an error.
-
-Plain numbers still work everywhere. Wavelengths given as plain numbers are assumed to be
-nanometers with a one-time deprecation warning; attach `nm` explicitly to silence it.
-
 ## Atmosphere Model
 
 The current atmosphere model is a single turbulent layer. Phase covariance follows Kolmogorov
@@ -128,6 +106,25 @@ and the exposure time in the matching time units (e.g. `wind_velocity=(4m/s, 4m/
 !!! note
     The sampled-bandpass model is most appropriate for narrow bands where the telescope pupil does
     not vary significantly with wavelength.
+
+## Physical Units
+
+The package integrates with [Unitful.jl](https://github.com/PainterQubits/Unitful.jl). Common
+length and time units (`m`, `cm`, `mm`, `μm`, `nm`, `s`, `ms`, `μs`, `ns`) and the `@u_str`
+string macro are re-exported, so you can attach units directly:
+
+```julia
+atm = SingleLayer(0.2m; base_wavelength=550nm, wind_velocity=(4m/s, 4m/s))
+img_spec = ImagingSpec(CircularAperture((64, 64)), 2m, PhotonCount(1e7, 200);
+    filter=FilterSpec(550nm; bandwidth=40nm), exposure=Exposure(0.5s, 10))
+```
+
+Units are only bookkeeping over the same dimensionless ratios the simulation already used
+(``r_0 / \text{grid\_step}``, ``\lambda / \lambda_\text{base}``, ``v\,t / \text{grid\_step}``),
+so a fully unit-annotated run yields the exact same numbers as the equivalent plain-number run.
+Values that share a physical dimension may be given in **different** units — e.g. ``r_0`` in `cm`
+against an aperture in `m`; they are converted automatically. Inconsistent dimensions (say a length
+``r_0`` against a time `grid_step`) raise an error.
 
 ## Performance
 
