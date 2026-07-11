@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        julia-version: ['1.10', '1']
+        julia-version: ['lts', '1']
     
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +27,8 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
       
       - uses: julia-actions/julia-runtest@v1
+        env:
+          RUN_JET_TESTS: ${{ matrix.julia-version == '1' }}
       
       - uses: julia-actions/julia-processcoverage@v1
         if: matrix.julia-version == '1'
