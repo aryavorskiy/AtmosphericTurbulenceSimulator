@@ -268,11 +268,7 @@ function OpticalBuffers(::Type{T}, img_spec::ImagingSpec{NT}, scales, batch::Int
     buf2 = similar(buf1)
     psf_buffer = similar(buf1, NT, img_spec.img_size..., batch)
     read_buffer = similar(buf1, T, img_spec.img_size..., batch)
-    if nwavel(img_spec.filter_spec) == 1
-        interpolators = [BilinearShift(psf_buffer, (0, 0))]
-    else
-        interpolators = [BilinearScale(psf_buffer, scale) for scale in scales]
-    end
+    interpolators = [BilinearScale(psf_buffer, scale) for scale in scales]
     return OpticalBuffers(buf1, buf2, psf_buffer, read_buffer, plan_fft(buf1, (1, 2)), interpolators)
 end
 function write_phases!(aperture_buffer, phases, aperture, offset, phs_factor)
