@@ -19,4 +19,8 @@ export simulate_images, simulate_phases
 
 include("precompile.jl")
 
+# speckle_viewer(; kw...) = error("Makie.jl required for speckle_viewer; import Makie and try again.")
+function speckle_viewer end
+export speckle_viewer
+
 end # module AtmosphericTurbulenceSimulator
