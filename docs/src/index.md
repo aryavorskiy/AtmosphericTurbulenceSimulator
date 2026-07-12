@@ -126,6 +126,24 @@ Values that share a physical dimension may be given in **different** units — e
 against an aperture in `m`; they are converted automatically. Inconsistent dimensions (say a length
 ``r_0`` against a time `grid_step`) raise an error.
 
+## Interactive Viewer
+
+The package provides [`speckle_viewer`](@ref), an interactive window that samples a phase screen and 
+shows the resulting speckle image side by side. Sliders control the atmosphere (``r_0``, wind speed) 
+and imaging (wavelength, bandwidth, exposure) parameters, and buttons redraw the phase screen or remove 
+its tip/tilt. All slider ranges accept Unitful quantities.
+
+```@docs
+speckle_viewer
+```
+
+This widget is powered by [Makie](https://docs.makie.org/). Import an interactive backend (`GLMakie`/`WGLMakie`) to use it:
+
+```julia
+using AtmosphericTurbulenceSimulator, GLMakie
+speckle_viewer()
+```
+
 ## Performance
 
 ### Backends
