@@ -16,6 +16,12 @@ using Pkg
 Pkg.add(url="https://github.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl")
 ```
 
+For a quick interactive demo, install [`GLMakie`](https://github.com/MakieOrg/Makie.jl) and launch the speckle viewer:
+```julia
+using AtmosphericTurbulenceSimulator, GLMakie
+speckle_viewer()
+```
+
 ## Quick example
 
 To simulate speckle patterns formed by turbulence, define an atmosphere specification, an imager
