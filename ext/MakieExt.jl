@@ -27,13 +27,12 @@ the speckle image is recomputed on any control change. A fixed circular aperture
 """
 function AtmosphericTurbulenceSimulator.speckle_viewer(;
         wavelength_range=550:10:750, # nm
-        bw_range=0:5:50,             # nm
+        bw_range=0:10:100,           # nm
         exptime_range=0:0.1:3,       # s
         r0_range=10:5:30,            # cm
         wind_range=0:5:100,          # length units / s
         aperture = CircularAperture((64, 64)),
-        d=200,
-        nphotons=1e6
+        d=200
     )
 
     fig = Figure(size=(1200, 800))
@@ -61,33 +60,38 @@ function AtmosphericTurbulenceSimulator.speckle_viewer(;
     end
 
     on(remove_tiptilt_btn.clicks) do _
-        phs = phase_screen[][axes(aperture)..., 1]
-        coords = hcat(axes(phs, 1) .* ones(size(phs, 2))' |> vec,
-            ones(size(phs, 1)) .* axes(phs, 2)' |> vec)
-        txy = coords' * vec(phs .* aperture)
-        gxy = coords' * (vec(aperture) .* coords)
-        cx, cy = gxy \ txy
         phs_tot = phase_screen[]
-        phase_screen[] = phs_tot .- cx .* axes(phs_tot, 1) .- cy .* axes(phs_tot, 2)'
+        phs = phs_tot[axes(aperture)..., 1]
+        ox, oy = size(phs) .÷ 2
+        coords = hcat((axes(phs, 1) .- ox) .* ones(size(phs, 2))' |> vec,
+            ones(size(phs, 1)) .* (axes(phs, 2) .- oy)' |> vec) .* vec(aperture)
+        txy = coords' * vec(phs)
+        gxy = coords' * coords
+        cx, cy = gxy \ txy
+        phase_screen[] = phs_tot .- cx .* (axes(phs_tot, 1) .- ox) .- cy .* (axes(phs_tot, 2) .- oy)'
     end
 
     speckle_pattern = lift(wind_s, wl_s, bw_s, exp_s, phase_screen) do wind, wl, bw, exptime, phs
         atm = SavedPhases(phs, wind_velocity=(wind, 0))
-        img_spec = ImagingSpec(aperture, d, PhotonCount(nphotons, 0.0);
+        img_spec = ImagingSpec(aperture, d, PhotonCount(Inf);
             filter=FilterSpec(wl; bandwidth=bw, npts=iszero(bw) ? 0 : ceil(Int, bw / wl * 20 + 3)),
             exposure=Exposure(exptime))
         out = simulate_images(atm, img_spec; n=1, verbose=false, savephases=false)
         return Float32.(out.images[:, :, 1])
     end
 
+    axis_kw = (aspect=DataAspect(), xticklabelspace=24.0, yticklabelspace=30.0)
+    cbar_height(ax) = lift(vp -> vp.widths[2], ax.scene.viewport)
+
     phase_screen_2d = lift(phs -> phs[axes(aperture)..., 1], phase_screen)
-    ax_p, hm_p = heatmap(fig[3, 2], phase_screen_2d, colormap=:viridis, axis=(aspect=DataAspect(),))
+    ax_p, hm_p = heatmap(fig[3, 2], phase_screen_2d, colormap=:viridis, axis=axis_kw)
     contour!(ax_p, aperture, levels=[0.5], color=:white, linewidth=2)
     Colorbar(fig[3, 1], hm_p, label="Phase Screen (rad)", ticks=MultiplesTicks(5, pi, "π"),
-        flipaxis=false)
+        flipaxis=false, height=cbar_height(ax_p), tellheight=false, valign=:center, ticklabelspace=48.0)
 
-    ax_i, hm_i = heatmap(fig[3, 3], speckle_pattern, colormap=:inferno, axis=(aspect=DataAspect(),))
-    Colorbar(fig[3, 4], hm_i, label="Photon Counts")
+    ax_i, hm_i = heatmap(fig[3, 3], speckle_pattern, colormap=:inferno, axis=axis_kw)
+    Colorbar(fig[3, 4], hm_i, label="PSF (normalized)", tellheight=false,
+        height=cbar_height(ax_i), valign=:center, ticklabelspace=48.0)
 
     Label(fig[4, :], """
     Hint: drag to zoom, left-click to pan, ctrl+click to reset view.
