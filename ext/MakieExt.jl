@@ -6,15 +6,16 @@ using AtmosphericTurbulenceSimulator, Makie, Unitful
 # (e.g. "50 cm/s" instead of "50 cm s⁻¹").
 slashfmt(q) = replace(string(q), r" (\S+?)⁻¹" => s"/\1")
 
-function AtmosphericTurbulenceSimulator.speckle_viewer(;
+function AtmosphericTurbulenceSimulator.speckle_viewer(::Type{T}=Float64;
         wavelength_range = (550:10:750)nm,
         bw_range = (0:10:100)nm,
         exptime_range = (0:0.1:3)s,
         r0_range = (10:5:30)cm,
         wind_range = (0:5:100)cm/s,
         aperture = CircularAperture((64, 64)),
-        d = 2m
-    )
+        d = 2m,
+        deviceadapter=MultiThreaded()
+    ) where T
 
     fig = Figure(size=(1200, 800))
 
@@ -29,16 +30,16 @@ function AtmosphericTurbulenceSimulator.speckle_viewer(;
 
     Label(fig[1, 3:4], "Imaging", font=:bold, fontsize=18, tellwidth=false)
     img_sg = SliderGrid(fig[2, 3:4], valign=:top, alignmode=Inside(),
-        (label="Wavelength", range=wavelength_range, startvalue=first(wavelength_range), format=slashfmt),
-        (label="Bandwidth", range=bw_range, startvalue=first(bw_range), format=slashfmt),
-        (label="Exposure", range=exptime_range, startvalue=first(exptime_range), format=slashfmt))
+        (label="Wavelength", range=wavelength_range, startvalue=first(wavelength_range)),
+        (label="Bandwidth", range=bw_range, startvalue=first(bw_range)),
+        (label="Exposure", range=exptime_range, startvalue=first(exptime_range)))
     wl_s, bw_s, exp_s = (s.value for s in img_sg.sliders)
 
     phase_screen = lift(r0_s, newphase_btn.clicks) do r0, _
-        atm = SingleLayer(r0; interpolate=:auto)
+        atm = SingleLayer(T, r0; interpolate=:auto)
         pad = NoUnits(maximum(wind_range) / d * maximum(exptime_range))
         simulate_phases(atm, ceil.(Int, size(aperture) .* (1 + pad, 1));
-            n=1, verbose=false, grid_step=d / size(aperture, 2))
+            n=1, verbose=false, grid_step=d / size(aperture, 2), deviceadapter=deviceadapter)
     end
 
     on(remove_tiptilt_btn.clicks) do _
@@ -55,10 +56,10 @@ function AtmosphericTurbulenceSimulator.speckle_viewer(;
 
     speckle_pattern = lift(wind_s, wl_s, bw_s, exp_s, phase_screen) do wind, wl, bw, exptime, phs
         atm = SavedPhases(phs, wind_velocity=(wind, zero(wind)))
-        img_spec = ImagingSpec(aperture, d, PhotonCount(Inf);
+        img_spec = ImagingSpec(T, aperture, d, PhotonCount(Inf);
             filter=FilterSpec(wl; bandwidth=bw, npts=iszero(bw) ? 0 : ceil(Int, NoUnits(bw / wl) * 20 + 3)),
             exposure=Exposure(exptime))
-        out = simulate_images(atm, img_spec; n=1, verbose=false, savephases=false)
+        out = simulate_images(atm, img_spec; n=1, verbose=false, savephases=false, deviceadapter=deviceadapter)
         return Float32.(out.images[:, :, 1])
     end
 
