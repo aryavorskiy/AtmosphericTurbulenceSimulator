@@ -1,4 +1,5 @@
-using LinearAlgebra, FFTW, Distributions, HDF5, ProgressMeter, Adapt, ChunkSplitters
+using LinearAlgebra, FFTW, Distributions, HDF5, ProgressMeter, ChunkSplitters
+import Adapt: adapt, adapt_storage, adapt_structure
 
 """
     FilterSpec
@@ -64,8 +65,8 @@ function BilinearScale(to::AbstractArray, scale::Real)
     iy = copy!(similar(to, Int, ny), clamp.(floor.(Int, sy), 1, ny))
     ixp1 = copy!(similar(to, Int, nx), clamp.(ceil.(Int, sx), 1, nx))
     iyp1 = copy!(similar(to, Int, ny), clamp.(ceil.(Int, sy), 1, ny))
-    tx = copy!(similar(to, nx), (sx .- ix))
-    ty = copy!(similar(to, ny), (sy .- iy))
+    tx = oftype(vec(to), sx) .- ix
+    ty = oftype(vec(to), sy) .- iy
     return BilinearInterpolator(ix, iy, ixp1, iyp1, tx, ty, scale≈1)
 end
 function BilinearShift(to::AbstractArray, offset::NTuple{2})
@@ -180,9 +181,9 @@ function TrueSkyImage(true_sky::AbstractMatrix{T}) where {T<:Real}
     true_sky_fft ./= true_sky_fft[1, 1]  # normalize DC component to 1
     return TrueSkyImage{typeof(true_sky_fft)}(true_sky_fft)
 end
-Adapt.adapt_structure(to, ts::TrueSkyImage) =
-    TrueSkyImage(Adapt.adapt_storage(to, ts.true_sky_fft))
+adapt_structure(to, ts::TrueSkyImage) = TrueSkyImage(adapt_storage(to, ts.true_sky_fft))
 
+const FilterSpecType{T} = FilterSpec{<:Union{T, Quantity{T}}, <:Union{T, Quantity{T}}}
 """
     ImagingSpec
 
@@ -202,7 +203,7 @@ struct ImagingSpec{T, T2, AT<:AbstractMatrix{T}, FST<:FilterSpec}
         aperture::AbstractMatrix{T},
         grid_step::Number,
         photon_count::PhotonCount{T},
-        filter_spec::FilterSpec,
+        filter_spec::FilterSpecType{T},
         exposure::Exposure,
         img_size::NTuple{2,Int}) where T<:Real
         new{T, typeof(grid_step), typeof(aperture), typeof(filter_spec)}(
@@ -238,13 +239,15 @@ function ImagingSpec(aperture::AbstractMatrix{T}, d::Number, photon_count::Photo
     img_size::NTuple{2,Int}=round.(Int, size(aperture) .* 2 .* nyquist_oversample)) where T<:Real
     pc = convert(PhotonCount{T}, photon_count)
     ex = exposure isa Number ? Exposure(exposure) : exposure
-    return ImagingSpec(aperture, d/maximum(size(aperture)), pc, filter, ex, img_size)
+    ft = FilterSpec(
+        convert_numtype(T, filter.wavelengths), convert_numtype(T, filter.intensities))
+    return ImagingSpec(aperture, d/maximum(size(aperture)), pc, ft, ex, img_size)
 end
 ImagingSpec(::Type{T}, aperture::AbstractMatrix, args...; kw...) where T<:Real =
     ImagingSpec(convert.(T, aperture), args...; kw...)
 
-Adapt.adapt_structure(to, img_spec::ImagingSpec) =
-    ImagingSpec(Adapt.adapt_storage(to, img_spec.aperture), img_spec.grid_step,
+adapt_structure(to, img_spec::ImagingSpec) =
+    ImagingSpec(adapt_storage(to, img_spec.aperture), img_spec.grid_step,
     img_spec.photon_count, img_spec.filter_spec, img_spec.exposure, img_spec.img_size)
 plate_size(img_spec::ImagingSpec) = size(img_spec.aperture)
 image_size(img_spec::ImagingSpec) = img_spec.img_size

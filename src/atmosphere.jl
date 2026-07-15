@@ -1,12 +1,15 @@
-using LinearAlgebra, HDF5, Random, Adapt, ChunkSplitters
+using LinearAlgebra, HDF5, Random, ChunkSplitters
+import Adapt: adapt_storage
 
-const DEFAULT_WAVELEN = 550.0nm
+const DEFAULT_WAVELEN = 550nm
 abstract type AtmosphereSpec{T} end
 
 _as_wavelength(x::Unitful.Length) = x
 _as_wavelength(x::Unitful.Quantity) =
     throw(ArgumentError("Wavelengths must be length quantities, got $(typeof(x))."))
 _as_wavelength(x::Number) = x * nm
+numtype(x) = typeof(ustrip(x))
+convert_numtype(::Type{T}, x) where T = convert.(T, ustrip.(x)) .* unit(eltype(x))
 
 """
     kolmogorov_covmat(W)
@@ -46,7 +49,7 @@ end
 function KarhunenLoeveBuffers(sz::NTuple{2,Int}, (E, U)::EigenType, batch::Int)
     @assert length(E) == prod(sz)
     @assert size(U) == (length(E), length(E))
-    E .= clamp.(E, 0, Inf)
+    E .= max.(E, zero(eltype(E)))
     noise_transform = U .* sqrt.(E')
     noise_buffer = similar(U, size(U, 2), batch)
     out_array = similar(U, prod(sz), batch)
@@ -130,16 +133,21 @@ struct SingleLayer{T<:Number,T2<:Number,T3<:Number,KT} <: AtmosphereSpec{T}
     harding_kw::KT
 end
 function SingleLayer(r0::Number; base_wavelength=DEFAULT_WAVELEN, wind_velocity=(0, 0), kw...)
-    SingleLayer(float(r0), _as_wavelength(base_wavelength), wind_velocity, kw)
+    wl = _as_wavelength(base_wavelength)
+    SingleLayer(float(r0), convert_numtype(numtype(float(r0)), wl), wind_velocity, kw)
 end
-SingleLayer(::Type{T}, r0::Number; kw...) where T = SingleLayer(convert(T, ustrip(r0)) * unit(r0); kw...)
+SingleLayer(::Type{T}, r0::Number; kw...) where T = SingleLayer(convert_numtype(T, r0); kw...)
 function prepare_phasebuffers(spec::SingleLayer, plate_size::NTuple{2,Int}, plate_step::Number, batch::Int, deviceadapter)
     harding = HardingSpec(plate_size; spec.harding_kw...)
     low_size = harding.size_from
     low_r₀_px = oftype(ustrip(spec.r₀), NoUnits(spec.r₀ / plate_step) / 2^harding.nsteps)
-    covar = Adapt.adapt_storage(deviceadapter, kolmogorov_covmat(typeof(low_r₀_px), low_size))
-    covar .*= low_r₀_px^(-5/3)
-    E, U = eigen(Symmetric(covar))
+    covar_host = kolmogorov_covmat(typeof(low_r₀_px), low_size)
+    covar_host .*= low_r₀_px ^ (-5//3)
+    # covar = adapt_storage(deviceadapter, covar_host)
+    # E, U = eigen(Symmetric(covar))
+    E_host, U_host = eigen(Symmetric(covar_host))
+    E = adapt_storage(deviceadapter, E_host)
+    U = adapt_storage(deviceadapter, U_host)
     kl = KarhunenLoeveBuffers(low_size, (E, U), batch)
     return HardingInterpolator(kl, low_r₀_px, harding, deviceadapter)
 end
@@ -162,10 +170,12 @@ function harding_interpolate!(to, hbuf::HardingBuffers, from)
         crop_offset[1] + 1:crop_offset[1] + size(to, 1),
         crop_offset[2] + 1:crop_offset[2] + size(to, 2), :))
 end
-function harding_upsample!(to, from, noise_std)
-    c_d = 0.3198
-    c_m = -0.0341
-    c_f = -0.0017
+function harding_upsample!(to, from, noise_std_e)
+    T = eltype(to)
+    c_d = convert(T, 0.3198)
+    c_m = convert(T, -0.0341)
+    c_f = convert(T, -0.0017)
+    noise_std = convert(T, noise_std_e)
 
     # Padding offset
     n, m = size(from)
@@ -191,9 +201,10 @@ function harding_upsample!(to, from, noise_std)
                to[inds_even_x .- 3, inds_even_y .+ 3, :] + to[inds_even_x .- 3, inds_even_y .- 3, :])
 
     # Fill remaining sites
+    noise_std_2 = convert(T, noise_std * 2^(-5/12))
     randn!(@view to[inds_odd_x, inds_even_y, :])
     @views @. to[inds_odd_x, inds_even_y, :] =
-        $(noise_std * 2^(-5/12)) * to[inds_odd_x, inds_even_y, :] +
+        noise_std_2 * to[inds_odd_x, inds_even_y, :] +
         c_d * (to[inds_odd_x, inds_even_y .+ 1, :] + to[inds_odd_x, inds_even_y .- 1, :] +
                 to[inds_odd_x .+ 1, inds_even_y, :] + to[inds_odd_x .- 1, inds_even_y, :]) +
         c_m * (to[inds_odd_x .+ 1, inds_even_y .+ 2, :] + to[inds_odd_x .+ 1, inds_even_y .- 2, :] +
@@ -205,7 +216,7 @@ function harding_upsample!(to, from, noise_std)
 
     randn!(@view to[inds_even_x, inds_odd_y, :])
     @views @. to[inds_even_x, inds_odd_y, :] =
-        $(noise_std * 2^(-5/12)) * to[inds_even_x, inds_odd_y, :] +
+        noise_std_2 * to[inds_even_x, inds_odd_y, :] +
         c_d * (to[inds_even_x .+ 1, inds_odd_y, :] + to[inds_even_x .- 1, inds_odd_y, :] +
                 to[inds_even_x, inds_odd_y .+ 1, :] + to[inds_even_x, inds_odd_y .- 1, :]) +
         c_m * (to[inds_even_x .+ 1, inds_odd_y .+ 2, :] + to[inds_even_x .+ 1, inds_odd_y .- 2, :] +
@@ -233,8 +244,8 @@ end
 MultiThreaded(::Type{AT}, nworkers::Int) where {AT} = MultiThreaded(Val(AT), nworkers)
 MultiThreaded(adapter) = MultiThreaded(adapter, 1)
 MultiThreaded(nworkers::Int=Threads.nthreads()) = MultiThreaded(identity, nworkers)
-Adapt.adapt_storage(am::MultiThreaded{AT}, x) where {AT} = Adapt.adapt_storage(am.adapter, x)
-Adapt.adapt_storage(::MultiThreaded{Val{AT}}, x) where {AT} = Adapt.adapt_storage(AT, x)
+adapt_storage(am::MultiThreaded{AT}, x) where {AT} = adapt_storage(am.adapter, x)
+adapt_storage(::MultiThreaded{Val{AT}}, x) where {AT} = adapt_storage(AT, x)
 
 struct HardingInterpolator{BT,HBT,AT,CT}
     phs_buf::BT
@@ -256,11 +267,11 @@ function HardingInterpolator(phs_buf, r0::Number, hspec::HardingSpec, adapter::M
             for _ in 1:i
                 lsz = 2 .* lsz .- 11
             end
-            Adapt.adapt_storage(adapter, zeros(T, (lsz .+ 10)..., length(chunk_range)))
+            adapt_storage(adapter, zeros(T, (lsz .+ 10)..., length(chunk_range)))
         end
         HardingBuffers(bufs, noise_std)
     end
-    out_array = Adapt.adapt_storage(adapter, zeros(T, hspec.size_to..., batch))
+    out_array = adapt_storage(adapter, zeros(T, hspec.size_to..., batch))
     return HardingInterpolator(phs_buf, harding_bufs, chunk_ranges, out_array)
 end
 HardingInterpolator(phs_buf, r0::Number, hspec::HardingSpec, adapter) =
@@ -347,7 +358,7 @@ function prepare_phasebuffers(spec::SavedPhases{T}, plate_size::NTuple{2,Int},
     ))
     crop_indices = (1:plate_size[1], 1:plate_size[2])
     bd = BufferedDataset(spec.dataset, batch)
-    out_array = Adapt.adapt_storage(deviceadapter, zeros(T, (plate_size..., batch)))
+    out_array = adapt_storage(deviceadapter, zeros(T, (plate_size..., batch)))
     return SavedPhaseBuffers(bd, crop_indices, 1, out_array)
 end
 function samplephases!(sampler::SavedPhaseBuffers)
