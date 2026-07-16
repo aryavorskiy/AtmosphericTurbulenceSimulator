@@ -58,7 +58,7 @@ fig
 For larger simulations, specify the `file` keyword argument to write results directly to disk. 
 See the [Examples](@ref) section for more info.
 
-## Atmosphere Model
+### Atmosphere Model
 
 The current atmosphere model is a single turbulent layer. Phase covariance follows Kolmogorov
 statistics:
@@ -83,7 +83,7 @@ atmosphere specification. Each atmosphere spec also accepts a `base_wavelength` 
 550 nm; a Unitful length or a plain number assumed to be nm) that sets the reference wavelength for
 broadband simulations.
 
-## Imaging Model
+### Imaging Model
 
 The parameters of the imaging system are defined by an [`ImagingSpec`](@ref) object, which includes the following fields:
 - The aperture function, which can be a predefined shape like [`CircularAperture`](@ref) or a user-defined array.
