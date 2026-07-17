@@ -108,8 +108,10 @@ continuous flux (`background` can be omitted in this case).
 struct PhotonCount{GA,T<:Real}
     nphotons::T
     background::T
+    PhotonCount{GA,T}(nphotons, background) where {GA,T<:Real} =
+        new{GA,T}(convert(T, nphotons), convert(T, background))
     function PhotonCount{GA}(nphotons::T1, background::T2) where {T1<:Real,T2<:Real, GA}
-        return PhotonCount{promote_type(T1, T2),GA}(nphotons, background)
+        return PhotonCount{GA,promote_type(T1, T2)}(nphotons, background)
     end
 end
 function PhotonCount(nph, bg=nothing; gaussian_approx=false)
@@ -123,7 +125,7 @@ end
 convert_numtype(::Type{T}, pc::PhotonCount{GA}) where {T, GA} =
     PhotonCount{GA}(convert(T, pc.nphotons), convert(T, pc.background))
 isfinite_photons(pc::PhotonCount) = isfinite(pc.nphotons)
-@inline gaussian_approx(::PhotonCount{T,GA}) where {T,GA} = GA
+@inline gaussian_approx(::PhotonCount{GA}) where {GA} = GA
 
 struct Exposure{ET<:Number}
     exptime::ET
@@ -204,21 +206,21 @@ source brightness via `photon_count`, an optional spectral `filter_spec`, the `e
 and the output `img_size`.
 If `img_size` does not match the aperture’s Nyquist grid, the aperture is zero-padded accordingly.
 """
-struct ImagingSpec{T, T2, AT<:AbstractMatrix{T}, FST<:FilterSpec}
+struct ImagingSpec{T, T2, GA, AT<:AbstractMatrix{T}, FST<:FilterSpec}
     aperture::AT
     grid_step::T2
-    photon_count::PhotonCount{T}
+    photon_count::PhotonCount{GA,T}
     filter_spec::FST
     exposure::Exposure
     img_size::NTuple{2,Int}
     function ImagingSpec(
         aperture::AbstractMatrix{T},
         grid_step::Number,
-        photon_count::PhotonCount{T},
+        photon_count::PhotonCount{GA,T},
         filter_spec::FilterSpecType{T},
         exposure::Exposure,
-        img_size::NTuple{2,Int}) where T<:Real
-        new{T, typeof(grid_step), typeof(aperture), typeof(filter_spec)}(
+        img_size::NTuple{2,Int}) where {T<:Real, GA}
+        new{T, typeof(grid_step), GA, typeof(aperture), typeof(filter_spec)}(
             aperture, grid_step, photon_count, filter_spec, exposure, img_size)
     end
 end
@@ -320,11 +322,11 @@ function apply_truesky!(opt_buffer::OpticalBuffers, ds::DoubleSystem)
 end
 apply_truesky!(::OpticalBuffers, ::PointSource) = nothing
 
-_sample_poisson(::PhotonCount{true}, ::Type{T}, λ) = round(T, max(randn() * sqrt(λ) + λ, zero(λ)))
-_sample_poisson(::PhotonCount{false}, ::Type{T}, λ) = convert(T, rand(Poisson(λ)))
+_sample_poisson(::Val{true}, ::Type{T}, λ) where {T} = round(T, max(randn() * sqrt(λ) + λ, zero(λ)))
+_sample_poisson(::Val{false}, ::Type{T}, λ) where {T} = convert(T, rand(Poisson(λ)))
 function readout!(dst::AbstractArray{T}, img::AbstractArray, pc::PhotonCount{GA}, psf_norm) where {T, GA}
     if isfinite_photons(pc)
-        @. dst = _sample_poisson(pc, T, real(img) / psf_norm * pc.nphotons + pc.background)
+        @. dst = _sample_poisson($(Val(GA)), T, real(img) / psf_norm * pc.nphotons + pc.background)
     else
         @. dst = img / psf_norm
     end

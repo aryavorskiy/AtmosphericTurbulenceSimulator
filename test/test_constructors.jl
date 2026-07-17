@@ -1,4 +1,4 @@
-import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers, isfinite_photons
+import AtmosphericTurbulenceSimulator: HardingSpec, prepare_buffers, isfinite_photons, convert_numtype
 using Unitful
 
 @testset "Constructors" begin
@@ -122,7 +122,7 @@ using Unitful
 
         pc = PhotonCount(1e6, 100.0)
         @test isfinite_photons(pc)
-        @test convert(PhotonCount{Float32}, pc).nphotons ≈ Float32(1e6)
+        @test convert_numtype(Float32, pc).nphotons ≈ Float32(1e6)
 
         # Finite nphotons without background must throw
         @test_throws ArgumentError PhotonCount(1e6)
