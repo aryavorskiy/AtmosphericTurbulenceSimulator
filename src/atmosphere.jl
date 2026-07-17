@@ -143,11 +143,14 @@ function prepare_phasebuffers(spec::SingleLayer, plate_size::NTuple{2,Int}, plat
     low_r₀_px = oftype(ustrip(spec.r₀), NoUnits(spec.r₀ / plate_step) / 2^harding.nsteps)
     covar_host = kolmogorov_covmat(typeof(low_r₀_px), low_size)
     covar_host .*= low_r₀_px ^ (-5//3)
-    # covar = adapt_storage(deviceadapter, covar_host)
-    # E, U = eigen(Symmetric(covar))
-    E_host, U_host = eigen(Symmetric(covar_host))
-    E = adapt_storage(deviceadapter, E_host)
-    U = adapt_storage(deviceadapter, U_host)
+    if device_eigen(deviceadapter)
+        covar = adapt_storage(deviceadapter, covar_host)
+        E, U = eigen(Symmetric(covar))
+    else
+        E_host, U_host = eigen(Symmetric(covar_host))
+        E = adapt_storage(deviceadapter, E_host)
+        U = adapt_storage(deviceadapter, U_host)
+    end
     kl = KarhunenLoeveBuffers(low_size, (E, U), batch)
     return HardingInterpolator(kl, low_r₀_px, harding, deviceadapter)
 end
@@ -228,7 +231,7 @@ function harding_upsample!(to, from, noise_std_e)
 end
 
 """
-    MultiThreaded([adapter, nworkers])
+    ComputeBackend([adapter, nworkers][; device_eigen=true])
 
 Device adapter that enables multi-threaded phase generation and imaging on CPU.
 
@@ -236,16 +239,28 @@ Device adapter that enables multi-threaded phase generation and imaging on CPU.
 - `adapter`: optional storage adapter for internal buffers.
 - `nworkers`: number of threads to use (default: `Threads.nthreads()` if `adapter` is not
     provided, otherwise 1).
+
+# Keyword Arguments
+- `device_eigen`: whether the Karhunen-Loeve eigendecomposition is computed on device
+    (default `true`).
 """
-struct MultiThreaded{AT}
+struct ComputeBackend{AT}
     adapter::AT
     nworkers::Int
+    device_eigen::Bool
 end
-MultiThreaded(::Type{AT}, nworkers::Int) where {AT} = MultiThreaded(Val(AT), nworkers)
-MultiThreaded(adapter) = MultiThreaded(adapter, 1)
-MultiThreaded(nworkers::Int=Threads.nthreads()) = MultiThreaded(identity, nworkers)
-adapt_storage(am::MultiThreaded{AT}, x) where {AT} = adapt_storage(am.adapter, x)
-adapt_storage(::MultiThreaded{Val{AT}}, x) where {AT} = adapt_storage(AT, x)
+ComputeBackend(adapter, nworkers::Int; device_eigen::Bool=true) =
+    ComputeBackend(adapter, nworkers, device_eigen)
+ComputeBackend(::Type{AT}, nworkers::Int; kw...) where {AT} = ComputeBackend(Val(AT), nworkers; kw...)
+ComputeBackend(adapter; kw...) = ComputeBackend(adapter, 1; kw...)
+ComputeBackend(nworkers::Int=Threads.nthreads(); kw...) = ComputeBackend(identity, nworkers; kw...)
+adapt_storage(am::ComputeBackend{AT}, x) where {AT} = adapt_storage(am.adapter, x)
+adapt_storage(::ComputeBackend{Val{AT}}, x) where {AT} = adapt_storage(AT, x)
+
+const MultiThreaded = ComputeBackend
+
+device_eigen(adapter::ComputeBackend) = adapter.device_eigen
+device_eigen(::Any) = false
 
 struct HardingInterpolator{BT,HBT,AT,CT}
     phs_buf::BT
@@ -253,7 +268,7 @@ struct HardingInterpolator{BT,HBT,AT,CT}
     chunk_ranges::Vector{CT}
     out_array::AT
 end
-function HardingInterpolator(phs_buf, r0::Number, hspec::HardingSpec, adapter::MultiThreaded)
+function HardingInterpolator(phs_buf, r0::Number, hspec::HardingSpec, adapter::ComputeBackend)
     low_size = hspec.size_from
     any(low_size .≤ 11) && throw(ArgumentError("Dimensions must be greater than 11"))
     T = phase_type(phs_buf)
@@ -275,7 +290,7 @@ function HardingInterpolator(phs_buf, r0::Number, hspec::HardingSpec, adapter::M
     return HardingInterpolator(phs_buf, harding_bufs, chunk_ranges, out_array)
 end
 HardingInterpolator(phs_buf, r0::Number, hspec::HardingSpec, adapter) =
-    HardingInterpolator(phs_buf, r0, hspec, MultiThreaded(adapter))
+    HardingInterpolator(phs_buf, r0, hspec, ComputeBackend(adapter))
 plate_size(sampler::HardingInterpolator) = size(sampler.out_array)[1:2]
 batch_length(sampler::HardingInterpolator) = batch_length(sampler.phs_buf)
 phase_type(sampler::HardingInterpolator) = eltype(sampler.out_array)

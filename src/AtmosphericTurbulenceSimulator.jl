@@ -13,7 +13,7 @@ include("atmosphere.jl")
 export kolmogorov_covmat, SingleLayer, SavedPhases
 include("imaging.jl")
 export FilterSpec, ImagingSpec, PhotonCount, Exposure, PointSource, DoubleSystem, TrueSkyImage,
-    CircularAperture, MultiThreaded
+    CircularAperture, ComputeBackend, MultiThreaded
 include("simulation.jl")
 export simulate_images, simulate_phases
 

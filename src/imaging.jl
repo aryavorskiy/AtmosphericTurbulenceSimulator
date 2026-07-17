@@ -96,22 +96,34 @@ function interpolate_mapmuladd!(to::AbstractArray, from::AbstractArray, interp::
 end
 
 """
-    PhotonCount(nphotons[, background])
+    PhotonCount(nphotons[, background]; gaussian_approx=false)
 
 Specifies the photon budget for imaging simulations. Set `nphotons` to `Inf` for
 continuous flux (`background` can be omitted in this case).
+
+# Keyword Arguments
+- `gaussian_approx`: when true, Poisson noise is approximated by a rounded Gaussian
+  instead of sampled exactly (default `false`).
 """
-struct PhotonCount{T<:Real}
+struct PhotonCount{GA,T<:Real}
     nphotons::T
     background::T
+    function PhotonCount{GA}(nphotons::T1, background::T2) where {T1<:Real,T2<:Real, GA}
+        return PhotonCount{promote_type(T1, T2),GA}(nphotons, background)
+    end
 end
-PhotonCount(nphotons::T1, background::T2) where {T1<:Real,T2<:Real} =
-    return PhotonCount{promote_type(T1, T2)}(nphotons, background)
-PhotonCount(nphotons::Real) = isinf(nphotons) ? PhotonCount(Inf, zero(Float64)) :
-    throw(ArgumentError("Must specify background when `nphotons` is finite"))
-Base.convert(::Type{PhotonCount{T}}, pc::PhotonCount) where T<:Real =
-    PhotonCount{T}(pc.nphotons, pc.background)
+function PhotonCount(nph, bg=nothing; gaussian_approx=false)
+    if isinf(nph)
+        PhotonCount{gaussian_approx}(nph, zero(nph))
+    else
+        isnothing(bg) && throw(ArgumentError("Must specify background when `nphotons` is finite"))
+        PhotonCount{gaussian_approx}(nph, bg)
+    end
+end
+convert_numtype(::Type{T}, pc::PhotonCount{GA}) where {T, GA} =
+    PhotonCount{GA}(convert(T, pc.nphotons), convert(T, pc.background))
 isfinite_photons(pc::PhotonCount) = isfinite(pc.nphotons)
+@inline gaussian_approx(::PhotonCount{T,GA}) where {T,GA} = GA
 
 struct Exposure{ET<:Number}
     exptime::ET
@@ -237,7 +249,7 @@ function ImagingSpec(aperture::AbstractMatrix{T}, d::Number, photon_count::Photo
     filter::FilterSpec=FilterSpec(DEFAULT_WAVELEN),
     nyquist_oversample::Real=1, exposure::Union{Exposure,Number}=0,
     img_size::NTuple{2,Int}=round.(Int, size(aperture) .* 2 .* nyquist_oversample)) where T<:Real
-    pc = convert(PhotonCount{T}, photon_count)
+    pc = convert_numtype(T, photon_count)
     ex = exposure isa Number ? Exposure(exposure) : exposure
     ft = FilterSpec(
         convert_numtype(T, filter.wavelengths), convert_numtype(T, filter.intensities))
@@ -308,9 +320,11 @@ function apply_truesky!(opt_buffer::OpticalBuffers, ds::DoubleSystem)
 end
 apply_truesky!(::OpticalBuffers, ::PointSource) = nothing
 
-function readout!(dst::AbstractArray, img::AbstractArray, pc::PhotonCount, psf_norm)
+_sample_poisson(::PhotonCount{true}, ::Type{T}, λ) = round(T, max(randn() * sqrt(λ) + λ, zero(λ)))
+_sample_poisson(::PhotonCount{false}, ::Type{T}, λ) = convert(T, rand(Poisson(λ)))
+function readout!(dst::AbstractArray{T}, img::AbstractArray, pc::PhotonCount{GA}, psf_norm) where {T, GA}
     if isfinite_photons(pc)
-        @. dst = rand(Poisson(real(img) / psf_norm * pc.nphotons + pc.background))
+        @. dst = _sample_poisson(pc, T, real(img) / psf_norm * pc.nphotons + pc.background)
     else
         @. dst = img / psf_norm
     end
@@ -392,7 +406,7 @@ struct SimulationBuffers{BT<:OpticalBuffers,ST<:ImagingSpec,FT<:Real,OT,AT,CT,VT
 end
 image_size(img_buf::SimulationBuffers) = image_size(img_buf.opt_bufs[1])
 image_type(img_buf::SimulationBuffers) = eltype(img_buf.img_array)
-function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int, adapter::MultiThreaded) where T
+function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int, adapter::ComputeBackend) where T
     nbufs = min(adapter.nworkers, batch)
     chunk_ranges = collect(chunks(1:batch; n=nbufs))
     img_spec_adapt = adapt(adapter, img_spec)
@@ -410,7 +424,7 @@ function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int,
             long_exp_offsets(atm_spec, img_spec), img_array, phs_factors)
 end
 prepare_buffers(type, atm_spec, img_spec, batch, A) =
-    prepare_buffers(type, atm_spec, img_spec, batch, MultiThreaded(A))
+    prepare_buffers(type, atm_spec, img_spec, batch, ComputeBackend(A))
 function compute_images!(img_buf::SimulationBuffers, phases, true_sky)
     if length(img_buf.chunk_ranges) == 1
         compute_images!(img_buf.img_array, only(img_buf.opt_bufs), img_buf.spec,

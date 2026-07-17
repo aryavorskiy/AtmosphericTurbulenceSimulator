@@ -115,7 +115,7 @@ the results to an HDF5 file.
   used, pass e.g. `MultiThreaded(4)`.
 """
 function simulate_images(::Type{T}, true_sky::TrueSky, atm_spec::AtmosphereSpec, img_spec::ImagingSpec;
-    n::Int, batch::Int=DEFAULT_BATCH, file=nothing, verbose=true, savephases::Bool=true, deviceadapter=MultiThreaded()) where {T}
+    n::Int, batch::Int=DEFAULT_BATCH, file=nothing, verbose=true, savephases::Bool=true, deviceadapter=ComputeBackend()) where {T}
     if !isfinite_photons(img_spec.photon_count) && T <: Integer
         throw(ArgumentError("Integer image eltype not compatible with infinite-photon imaging spec."))
     end
