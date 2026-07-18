@@ -1,6 +1,7 @@
 <p align="center">
     <img alt="AtmosphericTurbulenceSimulator logo" src="https://raw.githubusercontent.com/aryavorskiy/AtmosphericTurbulenceSimulator.jl/master/docs/src/assets/logo.svg" />
 </p>
+
 # AtmosphericTurbulenceSimulator.jl
 
 | | | |

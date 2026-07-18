@@ -78,4 +78,4 @@ draw_disk!(ax_wavefront; radius=OBSTRUCTION)
 
 rowgap!(fig.layout, 0)
 colgap!(fig.layout, 0)
-save("logo.svg", fig)
+save("logo.svg", fig, pt_per_unit=0.4)
