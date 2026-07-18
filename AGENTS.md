@@ -59,12 +59,16 @@ Concrete specs: `SingleLayer` (KL decomposition + optional Harding interpolation
 
 `prepare_buffers` always returns `SimulationBuffers`, which owns a `Vector{OpticalBuffers}` (one per
 worker thread). Single-thread execution is handled as a special case inside `compute_images!`
-rather than a separate type. The `deviceadapter` argument is wrapped in `MultiThreaded` if it
+rather than a separate type. The `deviceadapter` argument is wrapped in `ComputeBackend` if it
 isn't one already, so passing e.g. `CuArray` still works.
 
-`MultiThreaded(nworkers)` is the CPU device adapter. It carries an inner storage adapter and a
-worker count. The default `deviceadapter` for `simulate_images` is `MultiThreaded()`
-(all available threads); for `simulate_phases` it is plain `Array`.
+`ComputeBackend([adapter]; nthreads, device_eigen=true)` is the CPU device adapter. It carries an
+inner storage adapter, a worker count (keyword-only; defaults to `Threads.nthreads()` when
+`adapter` is omitted, otherwise 1), and a `device_eigen` flag (whether the Karhunen-Loeve
+eigendecomposition runs on device). The default `deviceadapter` for `simulate_images` is
+`ComputeBackend()` (all available threads); for `simulate_phases` it is plain `Array`.
+`MultiThreaded(adapter, nthreads=1)` / `MultiThreaded(nthreads)` is a separate legacy constructor
+that always sets `device_eigen=false`; it is not an alias for `ComputeBackend`.
 
 `ImagingSpec` stores `grid_step` (physical size of one aperture pixel, in the same units as ``r₀``)
 directly. The public constructors take `d` (aperture diameter) as a **mandatory positional** argument
