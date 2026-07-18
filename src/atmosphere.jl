@@ -231,36 +231,39 @@ function harding_upsample!(to, from, noise_std_e)
 end
 
 """
-    ComputeBackend([adapter, nworkers][; device_eigen=true])
+    ComputeBackend([adapter; nthreads, device_eigen=true])
 
 Device adapter that enables multi-threaded phase generation and imaging on CPU.
 
 # Arguments
 - `adapter`: optional storage adapter for internal buffers.
-- `nworkers`: number of threads to use (default: `Threads.nthreads()` if `adapter` is not
-    provided, otherwise 1).
 
 # Keyword Arguments
+- `nthreads`: number of threads to use (default: `Threads.nthreads()` if `adapter` is not
+    provided, otherwise 1).
 - `device_eigen`: whether the Karhunen-Loeve eigendecomposition is computed on device
     (default `true`).
 """
 struct ComputeBackend{AT}
     adapter::AT
-    nworkers::Int
+    nthreads::Int
     device_eigen::Bool
+    ComputeBackend(adapter, nthreads::Int, device_eigen::Bool) =
+        new{typeof(adapter)}(adapter, nthreads, device_eigen)
+    ComputeBackend(::Type{T}, nthreads::Int, device_eigen::Bool) where {T} =
+        new{Val{T}}(Val(T), nthreads, device_eigen)
 end
-ComputeBackend(adapter, nworkers::Int; device_eigen::Bool=true) =
-    ComputeBackend(adapter, nworkers, device_eigen)
-ComputeBackend(::Type{AT}, nworkers::Int; kw...) where {AT} = ComputeBackend(Val(AT), nworkers; kw...)
-ComputeBackend(adapter; kw...) = ComputeBackend(adapter, 1; kw...)
-ComputeBackend(nworkers::Int=Threads.nthreads(); kw...) = ComputeBackend(identity, nworkers; kw...)
+ComputeBackend(adapter=identity;
+    nthreads::Int=adapter === identity ? Threads.nthreads() : 1,
+    device_eigen::Bool=true) =
+    ComputeBackend(adapter, nthreads, device_eigen)
 adapt_storage(am::ComputeBackend{AT}, x) where {AT} = adapt_storage(am.adapter, x)
 adapt_storage(::ComputeBackend{Val{AT}}, x) where {AT} = adapt_storage(AT, x)
-
-const MultiThreaded = ComputeBackend
-
 device_eigen(adapter::ComputeBackend) = adapter.device_eigen
 device_eigen(::Any) = false
+
+MultiThreaded(adapter, nthreads::Int=1) = ComputeBackend(adapter, nthreads, false)
+MultiThreaded(nthreads::Int=Threads.nthreads()) = ComputeBackend(identity, nthreads, false)
 
 struct HardingInterpolator{BT,HBT,AT,CT}
     phs_buf::BT
@@ -273,7 +276,7 @@ function HardingInterpolator(phs_buf, r0::Number, hspec::HardingSpec, adapter::C
     any(low_size .≤ 11) && throw(ArgumentError("Dimensions must be greater than 11"))
     T = phase_type(phs_buf)
     batch = batch_length(phs_buf)
-    nbufs = min(adapter.nworkers, batch)
+    nbufs = min(adapter.nthreads, batch)
     chunk_ranges = collect(chunks(1:batch; n=nbufs))
     noise_std = sqrt(0.5265 / r0^(5/3))
     harding_bufs = map(chunk_ranges) do chunk_range

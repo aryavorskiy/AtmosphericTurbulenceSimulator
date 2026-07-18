@@ -156,11 +156,11 @@ Julia, or start Julia with the `--threads` flag:
 julia --threads=auto    # use all available cores
 ```
 
-Use [`MultiThreaded`](@ref) for more fine-grained control over the CPU threading behavior, such as
+Use [`ComputeBackend`](@ref) for more fine-grained control over the CPU threading behavior, such as
 specifying the number of threads or the array type used for computations:
 
 ```julia
-simulate_images(atm, img_spec; n=100_000, file="simulation.h5", deviceadapter=MultiThreaded(16))
+simulate_images(atm, img_spec; n=100_000, file="simulation.h5", deviceadapter=ComputeBackend(nthreads=16))
 ```
 
 GPU execution is also supported. To use GPU arrays, pass the appropriate device adapter, for example 
@@ -171,11 +171,13 @@ using CUDA
 simulate_images(atm, img_spec; n=100_000, file="simulation.h5", deviceadapter=CuArray)
 ```
 
-Passing an array type directly is equivalent to wrapping it in `MultiThreaded(CuArray)`, which defaults to using the array backend with one CPU thread.
+Passing an array type directly is equivalent to wrapping it in `ComputeBackend(CuArray)`, which defaults to using the array backend with one CPU thread.
 
 !!! warning
-    CUDA.jl is the only GPU backend tested so far. Other Julia GPU array backends may work if
+    CUDA.jl and Metal.jl are the only GPU backends tested so far. Other Julia GPU array backends may work if
     they provide the required array operations and FFT support.
+
+    Note that some of them may not support eigendecomposition on the device (pass `device_eigen=false` to the `ComputeBackend` constructor to run the eigendecomposition on the CPU instead) and require simplified photon counting (pass `gaussian_approx=true` to the `PhotonCount` constructor).
 
 ### Batch Size
 

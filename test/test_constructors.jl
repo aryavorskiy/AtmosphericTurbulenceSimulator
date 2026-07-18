@@ -155,21 +155,30 @@ using Unitful
         @test any(x -> 0.0 < x < 1.0, ap_aa)
     end
 
-    @testset "MultiThreaded constructors" begin
-        mt1 = MultiThreaded(2)
-        @test mt1.nworkers == 2
-        @test mt1.adapter === identity
+    @testset "ComputeBackend constructors" begin
+        cb1 = ComputeBackend(identity, 2, true)
+        @test cb1.nthreads == 2
+        @test cb1.adapter === identity
+        @test cb1.device_eigen
 
-        mt2 = MultiThreaded(Array, 3)
-        @test mt2.adapter === Val(Array)
-        @test mt2.nworkers == 3
+        cb2 = ComputeBackend(Array, 3, false)
+        @test cb2.adapter === Val(Array)
+        @test cb2.nthreads == 3
+        @test !cb2.device_eigen
 
-        mt_default = MultiThreaded()
-        @test mt_default.nworkers == Threads.nthreads()
+        cb_default = ComputeBackend()
+        @test cb_default.nthreads == Threads.nthreads()
+        @test cb_default.device_eigen
 
-        mt_arr = MultiThreaded(Array)
-        @test mt_arr.adapter === Val(Array)
-        @test mt_arr.nworkers == 1
+        cb_kw = ComputeBackend(nthreads=4, device_eigen=false)
+        @test cb_kw.nthreads == 4
+        @test cb_kw.adapter === identity
+        @test !cb_kw.device_eigen
+
+        cb_arr = ComputeBackend(Array)
+        @test cb_arr.adapter === Val(Array)
+        @test cb_arr.nthreads == 1
+        @test cb_arr.device_eigen
     end
 
     @testset "TrueSky models" begin
@@ -205,7 +214,7 @@ using Unitful
         @test length(img_buf_serial.offsets) == 1
         @test img_buf_serial.offsets[1].can_ff
 
-        img_buf_parallel = prepare_buffers(Int32, atm, img_spec, 5, MultiThreaded(2))[2]
+        img_buf_parallel = prepare_buffers(Int32, atm, img_spec, 5, ComputeBackend(nthreads=2))[2]
         @test img_buf_parallel isa AtmosphericTurbulenceSimulator.SimulationBuffers
         @test length(img_buf_parallel.opt_bufs) == 2
         @test sum(length, img_buf_parallel.chunk_ranges) == 5

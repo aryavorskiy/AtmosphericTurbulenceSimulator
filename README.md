@@ -85,7 +85,7 @@ fig
 
 This toolchain utilizes Julia's multi-threading capabilities; add more threads by launching Julia with `julia --threads=N`, where `N` is the number of threads you want. You can set `N=auto` to use all available CPU threads.
 
-To enable CUDA (or other GPU backends), import the respective packages (e.g., `CUDA.jl`) and add `deviceadapter=CuArray` (or other device array type) to the `simulate_phases`/`simulate_images` function call. As of current version, only [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) is tested, feel free to open an issue if you encounter problems with other backends.
+To enable CUDA (or other GPU backends), import the respective packages (e.g., `CUDA.jl`) and add `deviceadapter=CuArray` (or other device array type) to the `simulate_phases`/`simulate_images` function call. As of current version, only [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) and [Metal.jl](https://github.com/JuliaGPU/Metal.jl) are tested, feel free to open an issue if you encounter problems with other backends.
 
 Please note that this package is in early development. There are multiple features planned for the future:
 - More advanced atmosphere models

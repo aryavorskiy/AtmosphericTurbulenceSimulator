@@ -14,7 +14,7 @@ function AtmosphericTurbulenceSimulator.speckle_viewer(::Type{T}=Float64;
         wind_range = (0:5:100)cm/s,
         aperture = CircularAperture((64, 64)),
         d = 2m,
-        deviceadapter=MultiThreaded()
+        deviceadapter=ComputeBackend()
     ) where T
 
     fig = Figure(size=(1200, 800))

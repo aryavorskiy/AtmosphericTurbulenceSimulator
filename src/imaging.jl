@@ -409,7 +409,7 @@ end
 image_size(img_buf::SimulationBuffers) = image_size(img_buf.opt_bufs[1])
 image_type(img_buf::SimulationBuffers) = eltype(img_buf.img_array)
 function prepare_buffers(::Type{T}, atm_spec, img_spec::ImagingSpec, batch::Int, adapter::ComputeBackend) where T
-    nbufs = min(adapter.nworkers, batch)
+    nbufs = min(adapter.nthreads, batch)
     chunk_ranges = collect(chunks(1:batch; n=nbufs))
     img_spec_adapt = adapt(adapter, img_spec)
     phs_factors = NoUnits.(img_spec.filter_spec.wavelengths ./ atm_spec.base_wavelength)
